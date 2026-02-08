@@ -2,25 +2,40 @@ package com.jack.friend.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val WhatsTeal = Color(0xFF008069)
-val WhatsTealDark = Color(0xFF075E54)
-val WhatsGreen = Color(0xFF25D366)
-val WhatsLightGreen = Color(0xFFDCF8C6)
-val WhatsBlue = Color(0xFF34B7F1)
-val WhatsChatBackground = Color(0xFFECE5DD)
-val WhatsMessageMe = Color(0xFFE7FFDB)
-val WhatsMessageOther = Color(0xFFFFFFFF)
-
-val Purple80 = Color(0xFFD0BCFF)
-val PurpleGrey80 = Color(0xFFCCC2DC)
-val Pink80 = Color(0xFFEFB8C8)
-
-val Purple40 = Color(0xFF6650a4)
-val PurpleGrey40 = Color(0xFF625b71)
-val Pink40 = Color(0xFF7D5260)
-
-// SwiftUI (iOS) Colors
+// Apple-inspired Palette (Modern/Clean)
 val AppleBlue = Color(0xFF007AFF)
-val AppleGray = Color(0xFF8E8E93)
-val AppleBackground = Color(0xFFF2F2F7)
-val AppleSystemBackground = Color(0xFFFFFFFF)
+val AppleGreen = Color(0xFF34C759)
+val AppleRed = Color(0xFFFF3B30)
+val AppleOrange = Color(0xFFFF9500)
+val AppleTeal = Color(0xFF30B0C7)
+val AppleIndigo = Color(0xFF5856D6)
+val ApplePink = Color(0xFFFF2D55)
+
+// Standard Gray Palette (iOS-like)
+val SystemGray = Color(0xFF8E8E93)
+val SystemGray2 = Color(0xFFAEA7AF)
+val SystemGray3 = Color(0xFFC7C7CC)
+val SystemGray4 = Color(0xFFD1D1D6)
+val SystemGray5 = Color(0xFFE5E5EA)
+val SystemGray6 = Color(0xFFF2F2F7)
+
+// Brand Colors (Renamed to match current usage but with new values)
+val FriendPrimary = AppleBlue
+val FriendPrimaryDark = Color(0xFF0056B3)
+val FriendSecondary = AppleGreen
+val FriendAccent = AppleOrange
+
+// Backgrounds
+val FriendBackground = Color(0xFFF2F2F7) // iOS Inset Grouped Background
+val FriendSurface = Color(0xFFFFFFFF)
+
+// Bubbles
+val FriendBubbleMe = AppleBlue
+val FriendBubbleOther = Color(0xFFE5E5EA) // SystemGray5
+
+// Text & Icons
+val FriendOnPrimary = Color.White
+val FriendOnSurface = Color(0xFF000000)
+val FriendOnSurfaceVariant = Color(0xFF3C3C43) // Secondary Label color (approx)
+
+val WhatsBlue = AppleBlue

@@ -1,38 +1,25 @@
 package com.jack.friend
 
 import android.Manifest
-import android.content.ClipData
-import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.view.MotionEvent
 import android.widget.Toast
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.*
 import androidx.compose.animation.core.*
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -40,89 +27,67 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.*
+import androidx.compose.material.icons.automirrored.filled.ArrowBackIos
+import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.ClipEntry
-import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.jack.friend.ui.theme.*
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import java.io.File
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.common.api.ApiException
 import java.text.SimpleDateFormat
 import java.util.*
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        
-        // Iniciar serviço de segundo plano (Background Service)
-        val serviceIntent = Intent(this, MessagingService::class.java)
-        startService(serviceIntent)
-
         setContent {
             FriendTheme {
                 val viewModel: ChatViewModel = viewModel()
-                val isUserLoggedIn by viewModel.isUserLoggedIn.collectAsState()
-                
+                val isUserLoggedIn by viewModel.isUserLoggedIn.collectAsStateWithLifecycle()
                 val context = LocalContext.current
-                val prefs = remember { context.getSharedPreferences("security_prefs", Context.MODE_PRIVATE) }
+                val prefs = remember { context.getSharedPreferences("security_prefs", MODE_PRIVATE) }
                 val isPinEnabled = remember { prefs.getBoolean("pin_enabled", false) }
+                val isBiometricEnabled = remember { prefs.getBoolean("biometric_enabled", false) }
                 val correctPin = remember { prefs.getString("security_pin", "") ?: "" }
-                
-                var isUnlocked by remember { mutableStateOf(!isPinEnabled) }
+                var isUnlocked by remember { mutableStateOf(!(isPinEnabled || isBiometricEnabled)) }
 
-                // Solicitar permissão de notificação no Android 13+
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    val permissionLauncher = rememberLauncherForActivityResult(
-                        ActivityResultContracts.RequestPermission()
-                    ) { isGranted ->
-                        if (!isGranted) {
-                            Toast.makeText(context, "Permissão de notificação negada", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                    LaunchedEffect(Unit) {
-                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                            permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                        }
-                    }
+                val permissions = mutableListOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO).apply {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        add(Manifest.permission.POST_NOTIFICATIONS)
+                        add(Manifest.permission.READ_MEDIA_IMAGES)
+                    } else add(Manifest.permission.READ_EXTERNAL_STORAGE)
                 }
+                val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
+                LaunchedEffect(Unit) { launcher.launch(permissions.toTypedArray()) }
 
-                if (!isUserLoggedIn) {
-                    LoginScreen(viewModel)
-                } else if (!isUnlocked) {
-                    PinLockScreen(correctPin) {
-                        isUnlocked = true
-                    }
-                } else {
-                    ChatScreen(viewModel)
+                Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+                    if (!isUserLoggedIn) LoginScreen(viewModel)
+                    else if (!isUnlocked) PinLockScreen(correctPin, isBiometricEnabled) { isUnlocked = true }
+                    else ChatScreen(viewModel)
                 }
             }
         }
@@ -131,895 +96,213 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun LoginScreen(viewModel: ChatViewModel) {
-    var email by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var username by remember { mutableStateOf("") }
-    var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
-    var isSignUp by remember { mutableStateOf(false) }
-    var loading by remember { mutableStateOf(false) }
+    var email by remember { mutableStateOf("") }; var password by remember { mutableStateOf("") }
+    var username by remember { mutableStateOf("") }; var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
+    var isSignUp by remember { mutableStateOf(false) }; var loading by remember { mutableStateOf(false) }
+    val context = LocalContext.current; val googleSignInClient = remember { getGoogleSignInClient(context) }
     val chatColors = LocalChatColors.current
-    val context = LocalContext.current
-
-    val photoLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        selectedImageUri = uri
+    val googleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+        try {
+            val account = task.getResult(ApiException::class.java)
+            account?.idToken?.let { token ->
+                loading = true
+                viewModel.signInWithGoogle(token) { s, e -> loading = false; if (!s) Toast.makeText(context, e ?: "Erro Google", Toast.LENGTH_SHORT).show() }
+            }
+        } catch (e: Exception) { }
     }
+    val photoLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? -> selectedImageUri = uri }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(chatColors.background)
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Text(
-            text = if (isSignUp) "Criar Conta" else "Entrar no Wapi",
-            fontSize = 28.sp,
-            fontWeight = FontWeight.Bold,
-            color = chatColors.primary
-        )
-        
-        Spacer(modifier = Modifier.height(32.dp))
-
+    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Text(text = if (isSignUp) "Nova Conta" else "Bem-vindo", style = MaterialTheme.typography.titleLarge)
+        Spacer(modifier = Modifier.height(48.dp))
         if (isSignUp) {
-            // Foto de Perfil no Cadastro
-            Box(
-                modifier = Modifier
-                    .size(100.dp)
-                    .clip(CircleShape)
-                    .background(Color.LightGray)
-                    .clickable { photoLauncher.launch("image/*") },
-                contentAlignment = Alignment.Center
-            ) {
-                if (selectedImageUri != null) {
-                    AsyncImage(
-                        model = selectedImageUri,
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
-                    Icon(Icons.Default.AddAPhoto, null, modifier = Modifier.size(40.dp), tint = Color.White)
-                }
+            Box(modifier = Modifier.size(100.dp).clip(CircleShape).background(SystemGray5).clickable { photoLauncher.launch("image/*") }, contentAlignment = Alignment.Center) {
+                if (selectedImageUri != null) AsyncImage(model = selectedImageUri, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                else Icon(Icons.Default.AddAPhoto, null, modifier = Modifier.size(32.dp), tint = SystemGray)
             }
-            Text("Adicionar Foto", fontSize = 12.sp, color = chatColors.primary, modifier = Modifier.padding(top = 8.dp))
-            
             Spacer(modifier = Modifier.height(24.dp))
-
-            OutlinedTextField(
-                value = username,
-                onValueChange = { username = it },
-                label = { Text("Nome de Usuário") },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
-            )
-            Spacer(modifier = Modifier.height(16.dp))
+            TextField(value = username, onValueChange = { username = it }, placeholder = { Text("Usuário") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+            Spacer(modifier = Modifier.height(12.dp))
         }
-
-        OutlinedTextField(
-            value = email,
-            onValueChange = { email = it },
-            label = { Text("E-mail") },
-            modifier = Modifier.fillMaxWidth(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-            shape = RoundedCornerShape(12.dp)
-        )
-        
-        Spacer(modifier = Modifier.height(16.dp))
-
-        OutlinedTextField(
-            value = password,
-            onValueChange = { password = it },
-            label = { Text("Senha") },
-            modifier = Modifier.fillMaxWidth(),
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            shape = RoundedCornerShape(12.dp)
-        )
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        if (loading) {
-            CircularProgressIndicator(color = chatColors.primary)
-        } else {
-            Button(
-                onClick = {
-                    loading = true
-                    if (isSignUp) {
-                        viewModel.signUp(email, password, username, selectedImageUri) { success, error ->
-                            loading = false
-                            if (!success) Toast.makeText(context, error ?: "Erro ao cadastrar", Toast.LENGTH_SHORT).show()
-                        }
-                    } else {
-                        viewModel.login(email, password) { success, error ->
-                            loading = false
-                            if (!success) Toast.makeText(context, error ?: "Erro ao entrar", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                },
-                modifier = Modifier.fillMaxWidth().height(50.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = chatColors.primary)
-            ) {
-                Text(if (isSignUp) "Cadastrar" else "Entrar", color = Color.White, fontSize = 16.sp)
+        TextField(value = email, onValueChange = { email = it }, placeholder = { Text("E-mail") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+        Spacer(modifier = Modifier.height(12.dp))
+        TextField(value = password, onValueChange = { password = it }, placeholder = { Text("Senha") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation(), shape = RoundedCornerShape(12.dp))
+        Spacer(modifier = Modifier.height(32.dp))
+        if (loading) CircularProgressIndicator()
+        else {
+            Button(onClick = {
+                loading = true
+                if (isSignUp) viewModel.signUp(email, password, username, selectedImageUri) { s, e -> loading = false; if (!s) Toast.makeText(context, e ?: "Erro", Toast.LENGTH_SHORT).show() }
+                else viewModel.login(email, password) { s, e -> loading = false; if (!s) Toast.makeText(context, e ?: "Erro", Toast.LENGTH_SHORT).show() }
+            }, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = chatColors.primary)) {
+                Text(if (isSignUp) "Criar Conta" else "Entrar", color = Color.White, fontWeight = FontWeight.Bold)
             }
-
-            TextButton(onClick = { isSignUp = !isSignUp }) {
-                Text(
-                    if (isSignUp) "Já tem uma conta? Entre" else "Não tem uma conta? Cadastre-se",
-                    color = chatColors.primary
-                )
+            Spacer(modifier = Modifier.height(16.dp))
+            OutlinedButton(onClick = { googleLauncher.launch(googleSignInClient.signInIntent) }, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(14.dp)) {
+                Icon(Icons.Default.AccountCircle, null, tint = chatColors.primary); Spacer(Modifier.width(8.dp)); Text("Continuar com Google")
             }
+            TextButton(onClick = { isSignUp = !isSignUp }) { Text(if (isSignUp) "Já tem conta? Entre" else "Criar nova conta") }
         }
     }
 }
 
 @Composable
-fun PinLockScreen(correctPin: String, onUnlock: () -> Unit) {
-    var pinInput by remember { mutableStateOf("") }
-    var error by remember { mutableStateOf(false) }
-    val chatColors = LocalChatColors.current
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(chatColors.primary)
-            .padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Icon(
-            Icons.Default.Lock,
-            contentDescription = null,
-            modifier = Modifier.size(80.dp),
-            tint = Color.White
-        )
-        Spacer(modifier = Modifier.height(24.dp))
-        Text(
-            "Wapi App Protegido",
-            color = Color.White,
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            "Insira seu PIN para entrar",
-            color = Color.White.copy(alpha = 0.8f),
-            fontSize = 16.sp
-        )
-        
+fun PinLockScreen(correctPin: String, isBiometricEnabled: Boolean, onUnlock: () -> Unit) {
+    var pinInput by remember { mutableStateOf("") }; val chatColors = LocalChatColors.current; val context = LocalContext.current as? FragmentActivity ?: return
+    fun showBiometricPrompt() {
+        val executor = ContextCompat.getMainExecutor(context)
+        val biometricPrompt = androidx.biometric.BiometricPrompt(context, executor, object : androidx.biometric.BiometricPrompt.AuthenticationCallback() {
+            override fun onAuthenticationSucceeded(result: androidx.biometric.BiometricPrompt.AuthenticationResult) { super.onAuthenticationSucceeded(result); onUnlock() }
+        })
+        val promptInfo = androidx.biometric.BiometricPrompt.PromptInfo.Builder().setTitle("Bloqueio").setSubtitle("Use biometria para acessar").setNegativeButtonText("Usar PIN").build()
+        biometricPrompt.authenticate(promptInfo)
+    }
+    LaunchedEffect(Unit) { if (isBiometricEnabled) showBiometricPrompt() }
+    Column(modifier = Modifier.fillMaxSize().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Icon(Icons.Default.Lock, null, modifier = Modifier.size(64.dp), tint = chatColors.primary)
+        Spacer(modifier = Modifier.height(24.dp)); Text("App Bloqueado", style = MaterialTheme.typography.titleLarge)
         Spacer(modifier = Modifier.height(32.dp))
-        
-        OutlinedTextField(
-            value = pinInput,
-            onValueChange = { 
-                if (it.length <= 4 && it.all { char -> char.isDigit() }) {
-                    pinInput = it
-                    error = false
-                    if (it == correctPin) {
-                        onUnlock()
-                    }
-                }
-            },
-            modifier = Modifier.width(200.dp),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-            visualTransformation = PasswordVisualTransformation(),
-            singleLine = true,
-            isError = error,
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = Color.White,
-                unfocusedContainerColor = Color.White,
-                focusedBorderColor = Color.White,
-                unfocusedBorderColor = Color.White.copy(alpha = 0.5f),
-                focusedTextColor = Color.Black,
-                unfocusedTextColor = Color.Black
-            ),
-            shape = RoundedCornerShape(12.dp)
-        )
-        
-        if (error) {
-            Text("PIN incorreto", color = Color.Red, modifier = Modifier.padding(top = 8.dp))
-        }
-
-        if (pinInput.length == 4 && pinInput != correctPin) {
-            LaunchedEffect(pinInput) {
-                error = true
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) { repeat(4) { index -> Box(modifier = Modifier.size(16.dp).clip(CircleShape).background(if (pinInput.length > index) chatColors.primary else SystemGray4)) } }
+        Spacer(modifier = Modifier.height(48.dp))
+        val keys = listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "DEL")
+        LazyVerticalGrid(columns = GridCells.Fixed(3), modifier = Modifier.width(280.dp), verticalArrangement = Arrangement.spacedBy(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            items(keys) { key ->
+                if (key.isNotEmpty()) Box(modifier = Modifier.size(72.dp).clip(CircleShape).background(SystemGray6).clickable { if (key == "DEL") { if (pinInput.isNotEmpty()) pinInput = pinInput.dropLast(1) } else if (pinInput.length < 4) { pinInput += key; if (pinInput.length == 4) { if (pinInput == correctPin) onUnlock() else pinInput = "" } } }, contentAlignment = Alignment.Center) {
+                    if (key == "DEL") Icon(Icons.AutoMirrored.Filled.Backspace, null) else Text(key, style = MaterialTheme.typography.titleMedium)
+                } else Spacer(Modifier.size(72.dp))
             }
         }
+        if (isBiometricEnabled) IconButton(onClick = { showBiometricPrompt() }, modifier = Modifier.padding(top = 24.dp)) { Icon(Icons.Default.Fingerprint, null, modifier = Modifier.size(40.dp), tint = chatColors.primary) }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
-    val myId by viewModel.myId.collectAsState()
-    val myName by viewModel.myName.collectAsState()
-    val myPhotoUrl by viewModel.myPhotoUrl.collectAsState()
-    val targetId by viewModel.targetId.collectAsState()
-    val targetProfile by viewModel.targetProfile.collectAsState()
-    val messages by viewModel.messages.collectAsState()
-    val activeChats by viewModel.activeChats.collectAsState()
-    val searchResults by viewModel.searchResults.collectAsState()
-    val blockedUsers by viewModel.blockedUsers.collectAsState()
-    
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val listState = rememberLazyListState()
-    val chatColors = LocalChatColors.current
-    
-    var textState by remember { mutableStateOf("") }
-    var searchInput by remember { mutableStateOf("") }
-    var isSearching by remember { mutableStateOf(false) }
-    
-    val clipboard = LocalClipboard.current
-    var menuExpanded by remember { mutableStateOf(false) }
-    var showEmojiPicker by remember { mutableStateOf(false) }
-    var fullScreenImage by remember { mutableStateOf<String?>(null) }
+    val myId by viewModel.myId.collectAsStateWithLifecycle(""); val myPhotoUrl by viewModel.myPhotoUrl.collectAsStateWithLifecycle(null)
+    val targetId by viewModel.targetId.collectAsStateWithLifecycle(""); val targetProfile by viewModel.targetProfile.collectAsStateWithLifecycle(null)
+    val targetGroup by viewModel.targetGroup.collectAsStateWithLifecycle(null); val messages by viewModel.messages.collectAsStateWithLifecycle(emptyList())
+    val activeChats by viewModel.activeChats.collectAsStateWithLifecycle(emptyList()); val searchResults by viewModel.searchResults.collectAsStateWithLifecycle(emptyList())
+    val statuses by viewModel.statuses.collectAsStateWithLifecycle(emptyList()); val isTargetTyping by viewModel.isTargetTyping.collectAsStateWithLifecycle(false)
 
-    // Gerenciamento de Status Online (Apenas em primeiro plano)
+    val context = LocalContext.current; val listState = rememberLazyListState(); val chatColors = LocalChatColors.current
+    var textState by remember { mutableStateOf("") }; var searchInput by remember { mutableStateOf("") }; var isSearching by remember { mutableStateOf(false) }
+
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_START -> viewModel.updatePresence(true)
-                Lifecycle.Event.ON_STOP -> viewModel.updatePresence(false)
-                else -> {}
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_START) viewModel.updatePresence(true) else if (event == Lifecycle.Event.ON_STOP) viewModel.updatePresence(false) }
+        lifecycleOwner.lifecycle.addObserver(observer); onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // Intercepta o botão voltar do Android
-    BackHandler(enabled = targetId.isNotEmpty() || fullScreenImage != null || isSearching) {
-        if (fullScreenImage != null) {
-            fullScreenImage = null
-        } else if (isSearching) {
-            isSearching = false
-            searchInput = ""
-            viewModel.searchUsers("")
-        } else {
-            viewModel.setTargetId("")
-        }
-    }
-
-    // Controle do aviso de mensagens novas
-    var hasNewMessages by remember { mutableStateOf(false) }
-    var lastMessageCount by remember { mutableIntStateOf(0) }
-
-    // Detectar se o usuário está no final da lista
-    val isAtBottom by remember {
-        derivedStateOf {
-            val layoutInfo = listState.layoutInfo
-            val visibleItemsInfo = layoutInfo.visibleItemsInfo
-            if (layoutInfo.totalItemsCount == 0) {
-                true
-            } else {
-                val lastVisibleItem = visibleItemsInfo.lastOrNull()
-                lastVisibleItem?.index == layoutInfo.totalItemsCount - 1
-            }
-        }
-    }
-
-    // Resetar estados e scroll ao trocar de chat
-    LaunchedEffect(targetId) {
-        if (targetId.isNotEmpty()) {
-            lastMessageCount = 0
-            hasNewMessages = false
-            // Tenta scrollar para o fim caso já existam mensagens (cache local)
-            if (messages.isNotEmpty()) {
-                listState.scrollToItem(messages.size - 1)
-            }
-        }
-    }
-
-    // Monitorar novas mensagens para scroll automático ou alerta
-    LaunchedEffect(messages) {
-        if (messages.size > lastMessageCount) {
-            if (isAtBottom) {
-                // Se já estiver no fim, acompanha as novas mensagens
-                if (messages.isNotEmpty()) {
-                    listState.animateScrollToItem(messages.size - 1)
-                }
-                hasNewMessages = false
-            } else if (lastMessageCount > 0) {
-                // Se não estiver no fim e NÃO for o carregamento inicial, avisa que há novas mensagens
-                hasNewMessages = true
-            } else {
-                // Carregamento inicial do chat: vai direto para o fim
-                if (messages.isNotEmpty()) {
-                    listState.scrollToItem(messages.size - 1)
-                }
-            }
-        }
-        lastMessageCount = messages.size
-    }
-
-    LaunchedEffect(isAtBottom) {
-        if (isAtBottom) hasNewMessages = false
-    }
-
-    // Launcher para Galeria
-    val imageLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let { viewModel.uploadImage(it) }
-    }
-
-    // Launcher para Câmera
-    var tempPhotoUri by remember { mutableStateOf<Uri?>(null) }
-    val cameraLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicture()
-    ) { success ->
-        if (success) {
-            tempPhotoUri?.let { viewModel.uploadImage(it) }
-        }
-    }
-
-    // Launcher para Solicitar Permissões
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val recordAudioGranted = permissions[Manifest.permission.RECORD_AUDIO] ?: false
-        if (recordAudioGranted) {
-            Toast.makeText(context, "Permissão de áudio concedida", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    fun launchCamera() {
-        val permissionCheck = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
-        if (permissionCheck == PackageManager.PERMISSION_GRANTED) {
-            val file = File(context.cacheDir, "camera_photo_${System.currentTimeMillis()}.jpg")
-            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-            tempPhotoUri = uri
-            cameraLauncher.launch(uri)
-        } else {
-            permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA))
-        }
-    }
-
-    val sheetState = rememberModalBottomSheetState()
+    LaunchedEffect(targetId) { if (targetId.isNotEmpty()) viewModel.markAsRead() }
+    BackHandler(enabled = targetId.isNotEmpty() || isSearching) { if (isSearching) { isSearching = false; searchInput = ""; viewModel.searchUsers("") } else viewModel.setTargetId("") }
+    val imageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> uri?.let { viewModel.uploadImage(it, false) } }
+    val statusLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> uri?.let { viewModel.uploadStatus(it) } }
 
     Scaffold(
         topBar = {
-            @OptIn(ExperimentalMaterial3Api::class)
-            TopAppBar(
+            CenterAlignedTopAppBar(
                 title = {
                     if (targetId.isNotEmpty()) {
                         val currentChat = activeChats.find { it.friendId == targetId }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Surface(
-                                modifier = Modifier.size(36.dp),
-                                shape = CircleShape,
-                                color = Color.LightGray
-                            ) {
-                                val photoUrl = targetProfile?.photoUrl ?: currentChat?.friendPhotoUrl
-                                if (photoUrl != null) {
-                                    AsyncImage(
-                                        model = photoUrl,
-                                        contentDescription = null,
-                                        contentScale = ContentScale.Crop
-                                    )
-                                } else {
-                                    Icon(Icons.Default.Person, null, modifier = Modifier.padding(4.dp), tint = Color.White)
-                                }
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    targetProfile?.name ?: currentChat?.friendName ?: targetId,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = chatColors.onTopBar,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                val isOnline = targetProfile?.isOnline == true
-                                val lastActive = targetProfile?.lastActive ?: 0L
-                                val statusText = when {
-                                    isOnline -> "online"
-                                    lastActive > 0 -> {
-                                        val now = System.currentTimeMillis()
-                                        val diff = now - lastActive
-                                        if (diff < 60000) "visto por último agora"
-                                        else "visto por último " + SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(lastActive))
-                                    }
-                                    else -> ""
-                                }
-                                if (statusText.isNotEmpty()) {
-                                    Text(statusText, style = MaterialTheme.typography.labelSmall, color = chatColors.onTopBar.copy(alpha = 0.8f))
-                                }
-                            }
-                        }
-                    } else {
-                        if (isSearching) {
-                            TextField(
-                                value = searchInput,
-                                onValueChange = { 
-                                    searchInput = it
-                                    viewModel.searchUsers(it)
-                                },
-                                placeholder = { Text("Buscar usuário...", color = chatColors.onTopBar.copy(alpha = 0.6f)) },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true,
-                                colors = TextFieldDefaults.colors(
-                                    focusedContainerColor = Color.Transparent,
-                                    unfocusedContainerColor = Color.Transparent,
-                                    focusedIndicatorColor = Color.Transparent,
-                                    unfocusedIndicatorColor = Color.Transparent,
-                                    focusedTextColor = chatColors.onTopBar,
-                                    unfocusedTextColor = chatColors.onTopBar,
-                                    cursorColor = chatColors.onTopBar
-                                )
-                            )
-                        } else {
-                            Text("Wapi", color = chatColors.onTopBar, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                },
-                navigationIcon = {
-                    if (targetId.isNotEmpty()) {
-                        IconButton(onClick = { viewModel.setTargetId("") }) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Voltar", tint = chatColors.onTopBar)
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(if (targetGroup != null) (targetGroup?.name ?: "Grupo") else (targetProfile?.name ?: currentChat?.friendName ?: targetId), style = MaterialTheme.typography.titleMedium.copy(fontSize = 17.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (isTargetTyping) Text("digitando...", style = MaterialTheme.typography.labelSmall, color = AppleBlue)
+                            else if (targetProfile?.isOnline == true) Text("online", style = MaterialTheme.typography.labelSmall, color = AppleGreen)
                         }
                     } else if (isSearching) {
-                        IconButton(onClick = { 
-                            isSearching = false
-                            searchInput = ""
-                            viewModel.searchUsers("")
-                        }) {
-                            Icon(Icons.Default.Close, contentDescription = "Fechar Busca", tint = chatColors.onTopBar)
-                        }
-                    }
+                        TextField(value = searchInput, onValueChange = { searchInput = it; viewModel.searchUsers(it) }, placeholder = { Text("Buscar") }, modifier = Modifier.fillMaxWidth().height(44.dp), singleLine = true, shape = RoundedCornerShape(10.dp))
+                    } else Text("Conversas", style = MaterialTheme.typography.titleMedium)
                 },
-                actions = {
-                    if (targetId.isEmpty()) {
-                        if (!isSearching) {
-                            IconButton(onClick = { isSearching = true }) {
-                                Icon(Icons.Default.Search, null, tint = chatColors.onTopBar)
-                            }
+                navigationIcon = { if (targetId.isNotEmpty()) IconButton(onClick = { viewModel.setTargetId("") }) { Icon(Icons.AutoMirrored.Filled.ArrowBackIos, null, tint = chatColors.primary, modifier = Modifier.size(20.dp)) } else if (isSearching) IconButton(onClick = { isSearching = false; searchInput = ""; viewModel.searchUsers("") }) { Icon(Icons.Default.Close, null, tint = chatColors.primary) } },
+                actions = { if (targetId.isEmpty() && !isSearching) { IconButton(onClick = { isSearching = true }) { Icon(Icons.Default.Search, null, tint = chatColors.primary) }; IconButton(onClick = { context.startActivity(Intent(context, SettingsActivity::class.java)) }) { AsyncImage(model = myPhotoUrl, contentDescription = null, modifier = Modifier.size(28.dp).clip(CircleShape).background(SystemGray4), contentScale = ContentScale.Crop) } } else if (targetId.isNotEmpty()) { 
+                    IconButton(onClick = { 
+                        val myUsername = viewModel.myUsername.value
+                        val callKey = "WapiCall_Private_${if (myUsername < targetId) "${myUsername.lowercase()}_${targetId.lowercase()}" else "${targetId.lowercase()}_${myUsername.lowercase()}"}"
+                        viewModel.startCall(false, false)
+                        val intent = Intent(context, CallActivity::class.java).apply {
+                            putExtra("roomId", callKey)
+                            putExtra("targetId", targetId)
+                            putExtra("isOutgoing", true)
                         }
-                        // Foto de Perfil no Topo Direito (Substitui os 3 pontinhos na Home)
-                        IconButton(onClick = { context.startActivity(Intent(context, SettingsActivity::class.java)) }) {
-                            Surface(
-                                modifier = Modifier.size(32.dp),
-                                shape = CircleShape,
-                                color = Color.LightGray
-                            ) {
-                                if (myPhotoUrl != null) {
-                                    AsyncImage(
-                                        model = myPhotoUrl,
-                                        contentDescription = null,
-                                        contentScale = ContentScale.Crop
-                                    )
-                                } else {
-                                    Icon(Icons.Default.Person, null, modifier = Modifier.padding(4.dp), tint = Color.White)
-                                }
-                            }
-                        }
-                    } else {
-                        // Menu apenas dentro do Chat (Para Bloquear e Limpar)
-                        Box {
-                            IconButton(onClick = { menuExpanded = true }) { 
-                                Icon(Icons.Default.MoreVert, null, tint = chatColors.onTopBar) 
-                            }
-                            DropdownMenu(
-                                expanded = menuExpanded,
-                                onDismissRequest = { menuExpanded = false }
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text("Limpar Conversa") },
-                                    onClick = {
-                                        menuExpanded = false
-                                        viewModel.clearChat()
-                                    },
-                                    leadingIcon = { Icon(Icons.Default.DeleteSweep, null) }
-                                )
-                                val isBlocked = blockedUsers.contains(targetId)
-                                DropdownMenuItem(
-                                    text = { Text(if (isBlocked) "Desbloquear Usuário" else "Bloquear Usuário") },
-                                    onClick = {
-                                        menuExpanded = false
-                                        viewModel.toggleBlockUser(targetId)
-                                        if (!isBlocked) viewModel.setTargetId("") 
-                                    },
-                                    leadingIcon = { Icon(if (isBlocked) Icons.Default.LockOpen else Icons.Default.Block, null) }
-                                )
-                            }
-                        }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = chatColors.topBar)
+                        context.startActivity(intent)
+                    }) { Icon(Icons.Default.Call, null, tint = chatColors.primary) } 
+                } }
             )
         },
-        bottomBar = {
-            if (targetId.isNotBlank()) {
-                WhatsAppInput(
-                    text = textState,
-                    onTextChange = { textState = it },
-                    onEmojiClick = { showEmojiPicker = true },
-                    onImageClick = { imageLauncher.launch("image/*") },
-                    onCameraClick = { launchCamera() },
-                    onSend = {
-                        if (textState.isNotBlank()) {
-                            viewModel.sendMessage(textState)
-                            textState = ""
-                        }
-                    },
-                    onStartAudio = {
-                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                            viewModel.startRecording()
-                        } else {
-                            permissionLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
-                        }
-                    },
-                    onStopAudio = { viewModel.stopRecording() }
-                )
-            }
-        }
+        bottomBar = { if (targetId.isNotBlank()) SwiftInput(text = textState, onTextChange = { textState = it; viewModel.setTyping(it.isNotEmpty()) }, onImageClick = { imageLauncher.launch("image/*") }, onSend = { if (textState.isNotBlank()) { viewModel.sendMessage(textState, false); textState = "" } }, onAudioStart = { viewModel.startRecording(context.cacheDir) }, onAudioStop = { viewModel.stopRecording(false) }) }
     ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .padding(innerPadding)
-                .fillMaxSize()
-                .background(chatColors.background)
-        ) {
-            if (targetId.isBlank()) {
-                if (isSearching && searchInput.isNotEmpty()) {
-                    // Lista de resultados da busca integrada
-                    if (searchResults.isNotEmpty()) {
-                        LazyColumn(modifier = Modifier.fillMaxSize().background(Color.White)) {
-                            items(searchResults) { user ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            isSearching = false
-                                            searchInput = ""
-                                            viewModel.setTargetId(user.id)
-                                        }
-                                        .padding(16.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Surface(modifier = Modifier.size(50.dp), shape = CircleShape, color = Color.LightGray) {
-                                        if (user.photoUrl != null) {
-                                            AsyncImage(model = user.photoUrl, contentDescription = null, contentScale = ContentScale.Crop)
-                                        } else {
-                                            Icon(Icons.Default.Person, null, modifier = Modifier.padding(10.dp), tint = Color.White)
-                                        }
-                                    }
-                                    Spacer(modifier = Modifier.width(16.dp))
-                                    Text(user.id, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                }
-                            }
-                        }
-                    } else {
-                        Box(modifier = Modifier.fillMaxSize().background(Color.White), contentAlignment = Alignment.Center) {
-                            Text("Nenhum usuário encontrado", color = Color.Gray)
-                        }
-                    }
-                } else {
-                    // Lista de conversas ativas
-                    if (activeChats.isEmpty()) {
-                        Box(modifier = Modifier.fillMaxSize().background(Color.White), contentAlignment = Alignment.Center) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(Icons.AutoMirrored.Filled.Message, null, modifier = Modifier.size(80.dp), tint = Color.LightGray.copy(alpha = 0.5f))
-                                Spacer(Modifier.height(16.dp))
-                                Text("Nenhuma mensagem recebida ainda", color = Color.Gray)
-                            }
-                        }
-                    } else {
-                        LazyColumn(modifier = Modifier.fillMaxSize().background(Color.White)) {
-                            items(activeChats) { summary ->
-                                var showMenu by remember { mutableStateOf(false) }
-                                
-                                Box {
-                                    WhatsChatItem(
-                                        summary = summary, 
-                                        myId = myId,
-                                        onLongClick = { showMenu = true }
-                                    ) {
-                                        viewModel.setTargetId(summary.friendId)
-                                    }
-
-                                    DropdownMenu(
-                                        expanded = showMenu,
-                                        onDismissRequest = { showMenu = false }
-                                    ) {
-                                        val isFriendBlocked = blockedUsers.contains(summary.friendId)
-                                        DropdownMenuItem(
-                                            text = { Text(if (isFriendBlocked) "Desbloquear" else "Bloquear") },
-                                            leadingIcon = { Icon(if (isFriendBlocked) Icons.Default.LockOpen else Icons.Default.Block, null) },
-                                            onClick = {
-                                                viewModel.toggleBlockUser(summary.friendId)
-                                                showMenu = false
-                                            }
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("Apagar Conversa", color = Color.Red) },
-                                            leadingIcon = { Icon(Icons.Default.Delete, null, tint = Color.Red) },
-                                            onClick = {
-                                                viewModel.clearChat(summary.friendId)
-                                                showMenu = false
-                                            }
-                                        )
-                                    }
-                                }
-                            }
-                        }
+        Box(modifier = Modifier.padding(innerPadding).fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+            if (targetId.isEmpty()) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    if (!isSearching) { SwiftStatusRow(statuses, myPhotoUrl) { statusLauncher.launch("image/*") }; HorizontalDivider(color = SystemGray5, thickness = 0.5.dp) }
+                    LazyColumn(modifier = Modifier.fillMaxSize()) {
+                        if (isSearching && searchInput.isNotEmpty()) items(searchResults) { user -> SwiftUserItem(user) { isSearching = false; viewModel.setTargetId(user.id, false) } }
+                        else items(activeChats, key = { it.friendId }) { summary -> SwiftChatItem(summary, myId) { viewModel.setTargetId(summary.friendId, summary.isGroup) } }
                     }
                 }
             } else {
-                // Tela de Chat
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
-                    contentPadding = PaddingValues(top = 12.dp, bottom = 80.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    items(messages, key = { it.id }) { message ->
-                        WhatsMessageBubble(
-                            message = message, 
-                            isMe = message.senderId == myId,
-                            onImageClick = { fullScreenImage = it }
-                        )
-                    }
-                }
-                
-                // Botão de "Novas Mensagens Abaixo"
-                AnimatedVisibility(
-                    visible = hasNewMessages,
-                    enter = fadeIn(),
-                    exit = fadeOut(),
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 90.dp, end = 16.dp)
-                ) {
-                    ExtendedFloatingActionButton(
-                        onClick = {
-                            scope.launch {
-                                listState.animateScrollToItem(messages.size - 1)
-                                hasNewMessages = false
-                            }
-                        },
-                        containerColor = Color.White,
-                        contentColor = chatColors.primary,
-                        shape = CircleShape,
-                        modifier = Modifier.height(40.dp),
-                        elevation = FloatingActionButtonDefaults.elevation(4.dp)
-                    ) {
-                        Icon(Icons.Default.KeyboardArrowDown, null)
-                        Text("Mensagens novas", fontSize = 12.sp)
-                    }
-                }
-            }
-
-            if (showEmojiPicker) {
-                ModalBottomSheet(
-                    onDismissRequest = { showEmojiPicker = false },
-                    sheetState = sheetState,
-                    containerColor = Color.White
-                ) {
-                    EmojiPicker(onEmojiSelected = { 
-                        textState += it
-                        showEmojiPicker = false
-                    })
-                }
-            }
-
-            // Full screen image viewer
-            if (fullScreenImage != null) {
-                FullScreenImageViewer(
-                    imageUrl = fullScreenImage!!,
-                    onDismiss = { fullScreenImage = null }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun FullScreenImageViewer(imageUrl: String, onDismiss: () -> Unit) {
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black)
-                .clickable { onDismiss() },
-            contentAlignment = Alignment.Center
-        ) {
-            AsyncImage(
-                model = imageUrl,
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit
-            )
-            IconButton(
-                onClick = onDismiss,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(16.dp)
-                    .statusBarsPadding()
-            ) {
-                Icon(Icons.Default.Close, contentDescription = "Fechar", tint = Color.White)
-            }
-        }
-    }
-}
-
-@Composable
-fun EmojiPicker(onEmojiSelected: (String) -> Unit) {
-    val emojis = listOf(
-        "😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣", "😊", "😇",
-        "🙂", "🙃", "😉", "😌", "😍", "🥰", "😘", "😗", "😙", "😚",
-        "😋", "😛", "😝", "😜", "🤪", "🤨", "🧐", "🤓", "😎", "🤩",
-        "🥳", "😏", "😒", "😞", "😔", "😟", "😕", "🙁", "☹️", "😣",
-        "😖", "😫", "😩", "🥺", "😢", "😭", "😤", "😠", "😡", "🤬",
-        "🤯", "😳", "🥵", "🥶", "😱", "😨", "😰", "😥", "😓", "🤗",
-        "🤔", "🤭", "🤫", "🤥", "😶", "😐", "😑", "😬", "🙄", "😯",
-        "😦", "😧", "😮", "😲", "😴", "🤤", "😪", "😵", "🤐", "🥴",
-        "🤢", "🤮", "🤧", "😷", "🧼", "🤕", "🤑", "🤠", "😈", "👿",
-        "👹", "👺", "🤡", "👻", "💀", "☠️", "👽", "👾", "🤖", "🎃"
-    )
-
-    Column(modifier = Modifier.fillMaxWidth().height(300.dp).padding(16.dp)) {
-        Text("Emojis", fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.padding(bottom = 16.dp))
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 40.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(emojis) { emoji ->
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clickable { onEmojiSelected(emoji) },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(emoji, fontSize = 24.sp)
+                val myUsername by viewModel.myUsername.collectAsStateWithLifecycle("")
+                LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp), contentPadding = PaddingValues(top = 16.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    items(messages, key = { it.id }) { message -> SwiftMessageBubble(message, message.senderId == myUsername) }
                 }
             }
         }
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun WhatsChatItem(
-    summary: ChatSummary, 
-    myId: String, 
-    onLongClick: () -> Unit = {},
-    onClick: () -> Unit
-) {
-    val chatColors = LocalChatColors.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = onLongClick
-            )
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Surface(modifier = Modifier.size(50.dp), shape = CircleShape, color = Color.LightGray) {
-            if (summary.friendPhotoUrl != null) {
-                AsyncImage(model = summary.friendPhotoUrl, contentDescription = null, contentScale = ContentScale.Crop)
-            } else {
-                Icon(Icons.Default.Person, null, modifier = Modifier.padding(10.dp), tint = Color.White)
-            }
+fun SwiftStatusRow(statuses: List<UserStatus>, myPhotoUrl: String?, onAdd: () -> Unit) {
+    LazyRow(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp), contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        item { Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onAdd() }) { Box { AsyncImage(model = myPhotoUrl, contentDescription = null, modifier = Modifier.size(60.dp).clip(CircleShape).background(SystemGray5), contentScale = ContentScale.Crop); Icon(Icons.Default.Add, null, modifier = Modifier.align(Alignment.BottomEnd).size(20.dp).background(AppleBlue, CircleShape).padding(2.dp), tint = Color.White) }; Text("Seu status", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp)) } }
+        items(statuses) { status -> Column(horizontalAlignment = Alignment.CenterHorizontally) { AsyncImage(model = status.userPhotoUrl, contentDescription = null, modifier = Modifier.size(60.dp).clip(CircleShape).border(2.dp, AppleBlue, CircleShape).padding(3.dp).clip(CircleShape), contentScale = ContentScale.Crop); Text(status.username, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp)) } }
+    }
+}
+
+@Composable
+fun SwiftChatItem(summary: ChatSummary, myId: String, onClick: () -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box {
+            AsyncImage(model = summary.friendPhotoUrl, contentDescription = null, modifier = Modifier.size(60.dp).clip(CircleShape).background(SystemGray5), contentScale = ContentScale.Crop)
+            if (summary.isOnline) Box(modifier = Modifier.align(Alignment.BottomEnd).size(14.dp).background(Color.White, CircleShape).padding(2.dp).background(AppleGreen, CircleShape))
         }
-        Spacer(modifier = Modifier.width(16.dp))
+        Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(summary.friendName ?: summary.friendId, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    if (summary.isOnline) {
-                        Spacer(Modifier.width(6.dp))
-                        Box(Modifier.size(8.dp).background(Color.Green, CircleShape))
-                    }
-                }
-                val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(summary.timestamp))
-                Text(time, fontSize = 12.sp, color = if (summary.hasUnread) chatColors.fab else Color.Gray)
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(summary.friendName ?: summary.friendId, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold))
+                val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(summary.timestamp)); Text(time, style = MaterialTheme.typography.labelSmall, color = if (summary.hasUnread) AppleBlue else SystemGray)
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (summary.lastSenderId == myId) { // Se você foi o remetente
-                     Icon(
-                         Icons.Default.DoneAll, 
-                         null, 
-                         modifier = Modifier.size(16.dp), 
-                         tint = if (summary.lastMessageRead) WhatsBlue else Color.Gray
-                     )
-                }
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    summary.lastMessage,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    fontSize = 14.sp,
-                    color = Color.Gray,
-                    modifier = Modifier.weight(1f)
-                )
-                if (summary.hasUnread) {
-                    Box(modifier = Modifier.size(20.dp).background(chatColors.fab, CircleShape), contentAlignment = Alignment.Center) {
-                        Text("1", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
+            Text(text = summary.lastMessage, style = MaterialTheme.typography.bodyLarge, color = SystemGray, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
+        if (summary.hasUnread) Box(Modifier.padding(start = 8.dp).size(12.dp).background(AppleBlue, CircleShape))
+        Icon(Icons.Default.ChevronRight, null, tint = SystemGray3, modifier = Modifier.size(20.dp))
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun WhatsMessageBubble(
-    message: Message, 
-    isMe: Boolean, 
-    onLongClick: () -> Unit = {},
-    onImageClick: (String) -> Unit = {}
-) {
-    val alignment = if (isMe) Alignment.CenterEnd else Alignment.CenterStart
-    val chatColors = LocalChatColors.current
-    val bgColor = if (isMe) chatColors.bubbleMe else chatColors.bubbleOther
-    
+fun SwiftUserItem(user: UserProfile, onClick: () -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth().clickable { onClick() }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+        AsyncImage(model = user.photoUrl, contentDescription = null, modifier = Modifier.size(44.dp).clip(CircleShape).background(SystemGray5), contentScale = ContentScale.Crop)
+        Spacer(Modifier.width(16.dp)); Text(user.name, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+@Composable
+fun SwiftMessageBubble(message: Message, isMe: Boolean) {
+    val alignment = if (isMe) Alignment.CenterEnd else Alignment.CenterStart; val bubbleColor = if (isMe) AppleBlue else SystemGray5; val textColor = if (isMe) Color.White else Color.Black
     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = alignment) {
-        Surface(
-            color = bgColor,
-            shape = RoundedCornerShape(
-                topStart = 8.dp, topEnd = 8.dp,
-                bottomStart = if (isMe) 8.dp else 0.dp,
-                bottomEnd = if (isMe) 0.dp else 8.dp
-            ),
-            shadowElevation = 1.dp,
-            modifier = Modifier
-                .widthIn(max = 300.dp)
-                .padding(vertical = 2.dp)
-                .combinedClickable(
-                    onClick = {},
-                    onLongClick = onLongClick
-                )
-        ) {
-            Column(modifier = Modifier.padding(6.dp)) {
-                if (message.imageUrl != null) {
-                    AsyncImage(
-                        model = message.imageUrl,
-                        contentDescription = null,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 250.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                            .clickable { onImageClick(message.imageUrl!!) },
-                        contentScale = ContentScale.Crop
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                }
-                
-                if (message.audioUrl != null) {
-                    AudioPlayer(message.audioUrl!!, isMe)
-                }
-                
-                Row(verticalAlignment = Alignment.Bottom) {
-                    if (message.text.isNotEmpty()) {
-                        Text(
-                            text = message.text,
-                            fontSize = 16.sp,
-                            color = if (isMe && chatColors.bubbleMe == AppleBlue) Color.White else Color.Unspecified,
-                            modifier = Modifier.padding(end = 8.dp).weight(1f, fill = false)
-                        )
-                    }
-                    
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(message.timestamp))
-                        Text(time, fontSize = 10.sp, color = if (isMe && chatColors.bubbleMe == AppleBlue) Color.White.copy(alpha = 0.7f) else Color.Gray)
-                        if (isMe) {
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Icon(Icons.Default.DoneAll, null, modifier = Modifier.size(14.dp), tint = if (message.isRead) WhatsBlue else Color.Gray)
-                        }
+        Surface(color = bubbleColor, shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = if (isMe) 18.dp else 4.dp, bottomEnd = if (isMe) 4.dp else 18.dp), modifier = Modifier.widthIn(max = 280.dp)) {
+            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                if (message.imageUrl != null) AsyncImage(model = message.imageUrl, contentDescription = null, modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop)
+                if (message.audioUrl != null) Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.PlayArrow, null, tint = textColor); Text("Mensagem de voz", color = textColor, modifier = Modifier.padding(start = 8.dp)) }
+                if (message.text.isNotEmpty()) Text(message.text, style = MaterialTheme.typography.bodyLarge, color = textColor)
+                Row(modifier = Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+                    val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(message.timestamp))
+                    Text(time, style = MaterialTheme.typography.labelSmall, color = textColor.copy(alpha = 0.7f))
+                    if (isMe) {
+                        Spacer(Modifier.width(4.dp))
+                        Icon(if (message.isRead) Icons.Default.DoneAll else Icons.Default.Check, null, tint = if (message.isRead) Color.Cyan else textColor.copy(alpha = 0.7f), modifier = Modifier.size(14.dp))
                     }
                 }
             }
@@ -1027,220 +310,23 @@ fun WhatsMessageBubble(
     }
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun AudioPlayer(audioUrl: String, isMe: Boolean) {
-    val chatColors = LocalChatColors.current
-    var isPlaying by remember { mutableStateOf(false) }
-    var currentPosition by remember { mutableFloatStateOf(0f) }
-    var duration by remember { mutableIntStateOf(1) }
-    
-    val mediaPlayer = remember { MediaPlayer() }
-    
-    DisposableEffect(Unit) {
-        onDispose {
-            mediaPlayer.release()
-        }
-    }
-
-    // Loop para atualizar a barra de progresso
-    LaunchedEffect(isPlaying) {
-        if (isPlaying) {
-            while (isPlaying) {
-                currentPosition = mediaPlayer.currentPosition.toFloat() / duration
-                if (!mediaPlayer.isPlaying) isPlaying = false
-                delay(50)
-            }
-        }
-    }
-
-    val bubbleColor = if (isMe && chatColors.bubbleMe == AppleBlue) Color.White else chatColors.primary
-    val iconColor = if (isMe && chatColors.bubbleMe == AppleBlue) AppleBlue else Color.White
-
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .padding(8.dp)
-            .fillMaxWidth()
-            .height(56.dp)
-            .background(bubbleColor.copy(alpha = 0.1f), RoundedCornerShape(28.dp))
-            .padding(horizontal = 4.dp)
-    ) {
-        // Botão Play/Pause Circular
-        Box(
-            modifier = Modifier
-                .size(48.dp)
-                .background(bubbleColor, CircleShape)
-                .clickable {
-                    if (isPlaying) {
-                        mediaPlayer.pause()
-                        isPlaying = false
-                    } else {
-                        try {
-                            if (mediaPlayer.currentPosition > 0) {
-                                mediaPlayer.start()
-                                isPlaying = true
-                            } else {
-                                mediaPlayer.reset()
-                                mediaPlayer.setDataSource(audioUrl)
-                                mediaPlayer.prepareAsync()
-                                mediaPlayer.setOnPreparedListener { 
-                                    duration = it.duration
-                                    it.start()
-                                    isPlaying = true
-                                }
-                                mediaPlayer.setOnCompletionListener { 
-                                    isPlaying = false
-                                    currentPosition = 0f
-                                }
-                            }
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                        }
+fun SwiftInput(text: String, onTextChange: (String) -> Unit, onImageClick: () -> Unit, onSend: () -> Unit, onAudioStart: () -> Unit, onAudioStop: () -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f), modifier = Modifier.fillMaxWidth().navigationBarsPadding().imePadding()) {
+        Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onImageClick) { Icon(Icons.Default.Add, null, tint = AppleBlue, modifier = Modifier.size(28.dp)) }
+            TextField(value = text, onValueChange = onTextChange, placeholder = { Text("Mensagem") }, modifier = Modifier.weight(1f).heightIn(min = 36.dp, max = 120.dp), shape = RoundedCornerShape(20.dp), colors = TextFieldDefaults.colors(focusedContainerColor = SystemGray6, unfocusedContainerColor = SystemGray6, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent))
+            if (text.isNotEmpty()) IconButton(onClick = onSend) { Icon(Icons.Default.ArrowUpward, null, tint = Color.White, modifier = Modifier.background(AppleBlue, CircleShape).padding(4.dp).size(20.dp)) }
+            else {
+                IconButton(onClick = {}, modifier = Modifier.pointerInteropFilter { 
+                    when (it.action) {
+                        MotionEvent.ACTION_DOWN -> { onAudioStart(); true }
+                        MotionEvent.ACTION_UP -> { onAudioStop(); true }
+                        else -> false
                     }
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                contentDescription = null,
-                tint = iconColor,
-                modifier = Modifier.size(28.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.width(12.dp))
-
-        // Visualizador de Onda / Progresso
-        Box(modifier = Modifier.weight(1f).height(40.dp), contentAlignment = Alignment.Center) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val canvasWidth = size.width
-                val canvasHeight = size.height
-                val barWidth = 4.dp.toPx()
-                val gap = 2.dp.toPx()
-                val barCount = (canvasWidth / (barWidth + gap)).toInt()
-                
-                for (i in 0 until barCount) {
-                    val progress = i.toFloat() / barCount
-                    val isPast = progress < currentPosition
-                    
-                    // Altura aleatória para simular onda (baseada no index)
-                    val randomFactor = (Math.sin(i.toDouble() * 0.5) + 1) / 2
-                    val h = (canvasHeight * 0.3f + canvasHeight * 0.5f * randomFactor).toFloat()
-                    
-                    drawLine(
-                        color = if (isPast) bubbleColor else bubbleColor.copy(alpha = 0.3f),
-                        start = Offset(i * (barWidth + gap), (canvasHeight - h) / 2),
-                        end = Offset(i * (barWidth + gap), (canvasHeight + h) / 2),
-                        strokeWidth = barWidth,
-                        cap = StrokeCap.Round
-                    )
-                }
+                }) { Icon(Icons.Default.Mic, null, tint = AppleBlue, modifier = Modifier.size(24.dp)) }
             }
-        }
-
-        Spacer(modifier = Modifier.width(12.dp))
-        
-        // Timer
-        val remainingSeconds = if (isPlaying) (duration - mediaPlayer.currentPosition) / 1000 else duration / 1000
-        Text(
-            text = String.format("%02d:%02d", remainingSeconds / 60, remainingSeconds % 60),
-            fontSize = 12.sp,
-            color = bubbleColor,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.padding(end = 12.dp)
-        )
-    }
-}
-
-@Composable
-fun WhatsAppInput(
-    text: String,
-    onTextChange: (String) -> Unit,
-    onEmojiClick: () -> Unit,
-    onImageClick: () -> Unit,
-    onCameraClick: () -> Unit,
-    onSend: () -> Unit,
-    onStartAudio: () -> Unit,
-    onStopAudio: () -> Unit
-) {
-    val chatColors = LocalChatColors.current
-    var isRecording by remember { mutableStateOf(false) }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(8.dp)
-            .navigationBarsPadding()
-            .imePadding(),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Surface(
-            modifier = Modifier.weight(1f),
-            shape = RoundedCornerShape(24.dp),
-            color = Color.White,
-            shadowElevation = 1.dp
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(horizontal = 8.dp)
-            ) {
-                IconButton(onClick = onEmojiClick) { Icon(Icons.Default.SentimentSatisfied, null, tint = Color.Gray) }
-                TextField(
-                    value = if (isRecording) "Gravando áudio..." else text,
-                    onValueChange = onTextChange,
-                    placeholder = { Text("Mensagem") },
-                    modifier = Modifier.weight(1f),
-                    enabled = !isRecording,
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                        disabledContainerColor = Color.Transparent,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent
-                    )
-                )
-                if (!isRecording) {
-                    IconButton(onClick = onImageClick) { Icon(Icons.Default.AttachFile, null, tint = Color.Gray) }
-                    IconButton(onClick = onCameraClick) { Icon(Icons.Default.PhotoCamera, null, tint = Color.Gray) }
-                }
-            }
-        }
-        Spacer(modifier = Modifier.width(4.dp))
-        
-        val buttonColor = if (isRecording) Color.Red else chatColors.primary
-        
-        Box(
-            modifier = Modifier
-                .size(48.dp)
-                .background(buttonColor, CircleShape)
-                .pointerInput(text) {
-                    detectTapGestures(
-                        onPress = {
-                            if (text.isBlank()) {
-                                try {
-                                    isRecording = true
-                                    onStartAudio()
-                                    awaitRelease()
-                                } finally {
-                                    if (isRecording) {
-                                        isRecording = false
-                                        onStopAudio()
-                                    }
-                                }
-                            } else {
-                                onSend()
-                            }
-                        }
-                    )
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                if (text.isBlank()) Icons.Default.Mic else Icons.AutoMirrored.Filled.Send,
-                contentDescription = "Enviar",
-                tint = Color.White,
-                modifier = Modifier.size(24.dp)
-            )
         }
     }
 }

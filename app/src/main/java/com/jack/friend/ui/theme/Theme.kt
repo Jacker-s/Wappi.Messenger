@@ -1,16 +1,16 @@
 package com.jack.friend.ui.theme
 
 import android.content.Context
-import android.os.Build
+import android.content.SharedPreferences
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.Immutable
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 
 @Immutable
 data class ChatColors(
@@ -25,85 +25,111 @@ data class ChatColors(
 
 val LocalChatColors = staticCompositionLocalOf {
     ChatColors(
-        bubbleMe = WhatsMessageMe,
-        bubbleOther = WhatsMessageOther,
-        background = WhatsChatBackground,
-        topBar = WhatsTeal,
-        onTopBar = Color.White,
-        primary = WhatsTeal,
-        fab = WhatsGreen
+        bubbleMe = FriendBubbleMe,
+        bubbleOther = FriendBubbleOther,
+        background = FriendBackground,
+        topBar = FriendSurface,
+        onTopBar = FriendOnSurface,
+        primary = FriendPrimary,
+        fab = FriendSecondary
     )
 }
 
-private val DarkColorScheme = darkColorScheme(
-    primary = Purple80,
-    secondary = PurpleGrey80,
-    tertiary = Pink80
-)
-
-private val LightColorScheme = lightColorScheme(
-    primary = Purple40,
-    secondary = PurpleGrey40,
-    tertiary = Pink40
-)
-
-private val SwiftUIColorScheme = lightColorScheme(
-    primary = AppleBlue,
-    background = AppleBackground,
-    surface = AppleSystemBackground,
-    onPrimary = Color.White,
-    onBackground = Color.Black,
-    onSurface = Color.Black
+// SwiftUI-like Typography
+val AppTypography = Typography(
+    titleLarge = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Bold,
+        fontSize = 34.sp,
+        lineHeight = 41.sp,
+        letterSpacing = 0.37.sp
+    ),
+    titleMedium = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 20.sp,
+        lineHeight = 25.sp,
+        letterSpacing = 0.38.sp
+    ),
+    bodyLarge = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Normal,
+        fontSize = 17.sp,
+        lineHeight = 22.sp,
+        letterSpacing = (-0.41).sp
+    ),
+    labelSmall = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Medium,
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
+        letterSpacing = 0.sp
+    )
 )
 
 @Composable
 fun FriendTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = true,
+    isDarkModeOverride: Boolean? = null,
     content: @Composable () -> Unit
 ) {
     val context = LocalContext.current
-    val themePrefs = remember { context.getSharedPreferences("theme_prefs", Context.MODE_PRIVATE) }
-    val appTheme = themePrefs.getString("app_theme", "Material Design")
+    val uiPrefs = remember { context.getSharedPreferences("ui_prefs", Context.MODE_PRIVATE) }
+    var isDarkModePref by remember { mutableStateOf(uiPrefs.getBoolean("dark_mode", false)) }
 
-    val colorScheme = when (appTheme) {
-        "SwiftUI" -> SwiftUIColorScheme
-        else -> {
-            when {
-                dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-                    if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-                }
-                darkTheme -> DarkColorScheme
-                else -> LightColorScheme
+    DisposableEffect(uiPrefs) {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
+            if (key == "dark_mode") {
+                isDarkModePref = prefs.getBoolean("dark_mode", false)
             }
+        }
+        uiPrefs.registerOnSharedPreferenceChangeListener(listener)
+        isDarkModePref = uiPrefs.getBoolean("dark_mode", false)
+        onDispose {
+            uiPrefs.unregisterOnSharedPreferenceChangeListener(listener)
         }
     }
 
-    val chatColors = when (appTheme) {
-        "SwiftUI" -> ChatColors(
-            bubbleMe = AppleBlue,
-            bubbleOther = Color(0xFFE9E9EB),
-            background = Color.White,
-            topBar = Color(0xFFF9F9F9),
-            onTopBar = Color.Black,
-            primary = AppleBlue,
-            fab = AppleBlue
+    val actualDark = when {
+        isDarkModeOverride != null -> isDarkModeOverride
+        uiPrefs.contains("dark_mode") -> isDarkModePref
+        else -> darkTheme
+    }
+
+    val primaryColor = FriendPrimary
+
+    val colorScheme = if (actualDark) {
+        darkColorScheme(
+            primary = primaryColor,
+            background = Color(0xFF000000), // Pure black for OLED
+            surface = Color(0xFF1C1C1E),    // iOS Dark Gray
+            onSurface = Color.White,
+            onSurfaceVariant = SystemGray
         )
-        else -> ChatColors(
-            bubbleMe = WhatsMessageMe,
-            bubbleOther = WhatsMessageOther,
-            background = WhatsChatBackground,
-            topBar = WhatsTeal,
-            onTopBar = Color.White,
-            primary = WhatsTeal,
-            fab = WhatsGreen
+    } else {
+        lightColorScheme(
+            primary = primaryColor,
+            background = FriendBackground,
+            surface = FriendSurface,
+            onSurface = FriendOnSurface,
+            onSurfaceVariant = FriendOnSurfaceVariant
         )
     }
+
+    val chatColors = ChatColors(
+        bubbleMe = primaryColor,
+        bubbleOther = if (actualDark) Color(0xFF262629) else FriendBubbleOther,
+        background = if (actualDark) Color(0xFF000000) else FriendBackground,
+        topBar = if (actualDark) Color(0xFF1C1C1E) else FriendSurface,
+        onTopBar = if (actualDark) Color.White else FriendOnSurface,
+        primary = primaryColor,
+        fab = FriendSecondary
+    )
 
     CompositionLocalProvider(LocalChatColors provides chatColors) {
         MaterialTheme(
             colorScheme = colorScheme,
-            typography = Typography,
+            typography = AppTypography,
             content = content
         )
     }

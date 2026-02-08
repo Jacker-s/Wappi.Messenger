@@ -2,6 +2,7 @@ package com.jack.friend
 
 import com.google.firebase.database.IgnoreExtraProperties
 import com.google.firebase.database.PropertyName
+import java.io.Serializable
 
 @IgnoreExtraProperties
 data class Message(
@@ -11,6 +12,7 @@ data class Message(
     var text: String = "",
     var imageUrl: String? = null,
     var audioUrl: String? = null,
+    var stickerUrl: String? = null,
     var timestamp: Long = 0L,
     @get:PropertyName("isRead")
     @set:PropertyName("isRead")
@@ -30,5 +32,21 @@ data class Message(
     var isViewOnce: Boolean = false,
     @get:PropertyName("audioPlayed")
     @set:PropertyName("audioPlayed")
-    var audioPlayed: Boolean = false
-)
+    var audioPlayed: Boolean = false,
+    
+    // Suporte para Grupos
+    var isGroup: Boolean = false,
+    var senderName: String? = null, // Para mostrar quem enviou no grupo
+    var senderPhotoUrl: String? = null,
+    var isSticker: Boolean = false,
+
+    // Chamadas
+    var callType: String? = null, // "AUDIO", "VIDEO", "OFFER", "ANSWER", etc.
+    var callStatus: String? = null, // "STARTING", "MISSED", "ENDED"
+    var isCall: Boolean = false,
+    var callRoomId: String? = null,
+
+    // Mídia simplificada
+    var isMedia: Boolean = false,
+    var mediaUrl: String? = null
+) : Serializable

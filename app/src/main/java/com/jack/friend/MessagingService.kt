@@ -7,9 +7,12 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.Person
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.*
 
@@ -22,6 +25,7 @@ class MessagingService : Service() {
 
     companion object {
         private const val CHANNEL_ID = "messages_channel"
+        private const val CALL_CHANNEL_ID = "CALL_CHANNEL"
         private const val SILENT_CHANNEL_ID = "silent_service_channel"
         private const val FOREGROUND_ID = 1001
         private const val GROUP_KEY = "com.jack.friend.MESSAGES"
@@ -42,11 +46,10 @@ class MessagingService : Service() {
             this, 0, intent, PendingIntent.FLAG_IMMUTABLE
         )
 
-        // Esta notificação mantém o app vivo mas é "silenciosa" e não aparece na barra de status
         val notification = NotificationCompat.Builder(this, SILENT_CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle("Friend")
-            .setContentText("Conectado") // Texto mínimo
+            .setContentText("Serviço de mensagens ativo")
             .setPriority(NotificationCompat.PRIORITY_MIN)
             .setCategory(Notification.CATEGORY_SERVICE)
             .setVisibility(NotificationCompat.VISIBILITY_SECRET)
@@ -94,19 +97,16 @@ class MessagingService : Service() {
         removeListener()
         val startTime = System.currentTimeMillis()
         
-        database.child(".info/connected").addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                val connected = snapshot.getValue(Boolean::class.java) ?: false
-                if (connected) Log.d(TAG, "Conectado ao Firebase")
-            }
-            override fun onCancelled(error: DatabaseError) {}
-        })
-
         globalListener = object : ChildEventListener {
             override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
                 val m = snapshot.getValue(Message::class.java) ?: return
                 
                 if (m.receiverId == username && m.timestamp >= startTime) {
+                    if (m.callType != null && m.callStatus == "STARTING") {
+                        showIncomingCallNotification(m)
+                        return
+                    }
+
                     database.child("users").child(username).child("isOnline").get().addOnSuccessListener { onlineSnapshot ->
                         val isOnline = onlineSnapshot.getValue(Boolean::class.java) ?: false
                         
@@ -125,18 +125,57 @@ class MessagingService : Service() {
                     }
                 }
             }
-            override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {}
+            override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {
+                val m = snapshot.getValue(Message::class.java) ?: return
+                if (m.receiverId == username && m.callStatus != "STARTING") {
+                    val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+                    notificationManager.cancel(1002)
+                }
+            }
             override fun onChildRemoved(snapshot: DataSnapshot) {}
             override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) {}
-            override fun onCancelled(error: DatabaseError) {
-                Log.e(TAG, "Erro no listener: ${error.message}")
-            }
+            override fun onCancelled(error: DatabaseError) {}
         }
         
         database.child("messages")
             .orderByChild("timestamp")
             .startAt(startTime.toDouble())
             .addChildEventListener(globalListener!!)
+    }
+
+    private fun showIncomingCallNotification(message: Message) {
+        val intent = Intent(this, IncomingCallActivity::class.java).apply {
+            putExtra("callMessage", message)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+        
+        val fullScreenPendingIntent = PendingIntent.getActivity(
+            this, 0, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(this, CALL_CHANNEL_ID)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle("Chamada de ${message.senderName ?: "Alguém"}")
+            .setContentText("Toque para atender")
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setFullScreenIntent(fullScreenPendingIntent, true) // Isso faz a tela abrir direto
+            .setOngoing(true)
+            .setAutoCancel(false)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE))
+
+        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        
+        // Tenta abrir a activity direto se o app tiver a permissão SYSTEM_ALERT_WINDOW
+        try {
+            startActivity(intent)
+        } catch (e: Exception) {
+            Log.e(TAG, "Não foi possível abrir a Activity diretamente: ${e.message}")
+        }
+        
+        notificationManager.notify(1002, builder.build())
     }
 
     private fun showNotification(title: String, message: String) {
@@ -150,9 +189,8 @@ class MessagingService : Service() {
             PendingIntent.FLAG_IMMUTABLE
         )
 
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
 
-        // Notificação de Mensagem (Esta continua normal, com som e vibração)
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title)
@@ -166,7 +204,7 @@ class MessagingService : Service() {
 
         val summaryBuilder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("Friend App")
+            .setContentTitle("Friend")
             .setContentText("Novas mensagens")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setGroup(GROUP_KEY)
@@ -182,26 +220,32 @@ class MessagingService : Service() {
 
     private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
             
-            // Canal de Mensagens (Importância Alta)
             val msgChannel = NotificationChannel(CHANNEL_ID, "Mensagens", NotificationManager.IMPORTANCE_HIGH).apply {
                 description = "Notificações de novas mensagens"
                 enableLights(true)
                 enableVibration(true)
-                setShowBadge(true)
             }
             
-            // Canal Silencioso para o Serviço (Importância Mínima)
-            // Isso evita o ícone no topo da barra de status
-            val silentChannel = NotificationChannel(SILENT_CHANNEL_ID, "Serviço de Conexão", NotificationManager.IMPORTANCE_MIN).apply {
-                description = "Mantém o app conectado em segundo plano"
+            val callChannel = NotificationChannel(CALL_CHANNEL_ID, "Chamadas", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "Notificações de chamadas recebidas"
+                val audioAttributes = AudioAttributes.Builder()
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                    .build()
+                setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE), audioAttributes)
+                enableVibration(true)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            }
+            
+            val silentChannel = NotificationChannel(SILENT_CHANNEL_ID, "Conexão", NotificationManager.IMPORTANCE_MIN).apply {
+                description = "Mantém o app conectado"
                 setShowBadge(false)
-                enableLights(false)
-                enableVibration(false)
             }
             
             notificationManager.createNotificationChannel(msgChannel)
+            notificationManager.createNotificationChannel(callChannel)
             notificationManager.createNotificationChannel(silentChannel)
         }
     }
