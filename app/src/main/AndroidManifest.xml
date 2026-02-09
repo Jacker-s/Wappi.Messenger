@@ -11,6 +11,11 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.DISABLE_KEYGUARD" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
+    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
 
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <uses-permission android:name="android.permission.USE_FINGERPRINT" tools:node="remove" />
@@ -37,6 +42,11 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Friend"
         android:extractNativeLibs="true">
+
+        <service
+            android:name=".MessagingService"
+            android:exported="false"
+            android:foregroundServiceType="remoteMessaging" />
 
         <!-- SERVIÇO FCM PRINCIPAL PARA RECEBER MENSAGENS -->
         <service

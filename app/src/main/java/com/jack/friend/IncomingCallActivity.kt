@@ -1,11 +1,9 @@
 package com.jack.friend
 
 import android.app.KeyguardManager
-import android.content.BroadcastReceiver
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
-import android.media.AudioAttributes
 import android.media.Ringtone
 import android.media.RingtoneManager
 import android.os.Build
@@ -13,55 +11,49 @@ import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material3.*
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ValueEventListener
 import com.jack.friend.ui.theme.FriendTheme
-import java.io.Serializable
 
 class IncomingCallActivity : ComponentActivity() {
 
     private var ringtone: Ringtone? = null
-    private var vibrator: android.os.Vibrator? = null
     private var callStatusListener: ValueEventListener? = null
-    private var roomName: String? = null
-
-    private val closeReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == "com.jack.friend.ACTION_CLOSE_INCOMING_CALL") {
-                finish()
-            }
-        }
-    }
+    private var roomId: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Configurações críticas para aparecer sobre a tela de bloqueio e acordar o CPU
+        // Configurações para aparecer sobre a tela de bloqueio
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
-            val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
-            keyguardManager.requestDismissKeyguard(this, null)
+            val km = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+            km.requestDismissKeyguard(this, null)
         } else {
             @Suppress("DEPRECATION")
-            window.addFlags(
-                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                        WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-                        WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
-                        WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
-            )
+            window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                    WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
+                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-
-        // Registrar BroadcastReceiver para fechar a atividade remotamente
-        LocalBroadcastManager.getInstance(this).registerReceiver(
-            closeReceiver,
-            IntentFilter("com.jack.friend.ACTION_CLOSE_INCOMING_CALL")
-        )
 
         val callMessage = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             intent.getSerializableExtra("callMessage", Message::class.java)
@@ -70,92 +62,122 @@ class IncomingCallActivity : ComponentActivity() {
             intent.getSerializableExtra("callMessage") as? Message
         }
 
-        if (callMessage == null) {
-            finish()
-            return
-        }
-
-        roomName = if (callMessage.isGroup) {
-            "WapiCall_Group_${callMessage.receiverId.lowercase()}"
-        } else {
-            val ids = listOf(callMessage.senderId, callMessage.receiverId).sorted()
-            "WapiCall_Private_${ids[0].lowercase()}_${ids[1].lowercase()}"
-        }
+        if (callMessage == null) { finish(); return }
+        roomId = callMessage.callRoomId
 
         observeCallStatus()
-        startRingtoneAndVibration()
+        startRingtone()
 
         setContent {
             FriendTheme {
-                val viewModel: ChatViewModel = viewModel()
-                ModernIncomingCallOverlay(callMessage, viewModel)
+                IncomingCallScreen(
+                    callerName = callMessage.senderName ?: callMessage.senderId,
+                    onAccept = { acceptCall(callMessage) },
+                    onReject = { rejectCall() }
+                )
             }
         }
     }
 
     private fun observeCallStatus() {
-        val room = roomName ?: return
-        callStatusListener = object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                if (snapshot.exists()) {
+        roomId?.let { id ->
+            callStatusListener = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
                     val status = snapshot.child("status").getValue(String::class.java)
-                    if (status != "RINGING") {
+                    if (status == "ENDED" || status == "REJECTED" || status == "CONNECTED") {
+                        cancelCallNotification()
                         finish()
                     }
-                } else {
-                    finish()
                 }
+                override fun onCancelled(error: DatabaseError) {}
             }
-            override fun onCancelled(error: DatabaseError) {}
+            FirebaseDatabase.getInstance().reference.child("calls").child(id)
+                .addValueEventListener(callStatusListener!!)
         }
-        FirebaseDatabase.getInstance().reference.child("calls").child(room)
-            .addValueEventListener(callStatusListener!!)
     }
 
-    private fun startRingtoneAndVibration() {
+    private fun startRingtone() {
         try {
-            val notification: android.net.Uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-            ringtone = RingtoneManager.getRingtone(applicationContext, notification)
-            ringtone?.audioAttributes = AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .build()
+            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+            ringtone = RingtoneManager.getRingtone(applicationContext, uri)
             ringtone?.play()
-
-            vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as android.os.VibratorManager
-                vibratorManager.defaultVibrator
-            } else {
-                @Suppress("DEPRECATION")
-                getSystemService(Context.VIBRATOR_SERVICE) as android.os.Vibrator
-            }
-
-            val pattern = longArrayOf(0, 1000, 1000)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                vibrator?.vibrate(android.os.VibrationEffect.createWaveform(pattern, 0))
-            } else {
-                @Suppress("DEPRECATION")
-                vibrator?.vibrate(pattern, 0)
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        } catch (e: Exception) {}
     }
 
-    private fun stopRingtoneAndVibration() {
+    private fun acceptCall(message: Message) {
+        cancelCallNotification()
         ringtone?.stop()
-        vibrator?.cancel()
+        val intent = Intent(this, CallActivity::class.java).apply {
+            putExtra("roomId", message.callRoomId)
+            putExtra("targetId", message.senderId)
+            putExtra("isOutgoing", false)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+        startActivity(intent)
+        finish()
+    }
+
+    private fun rejectCall() {
+        roomId?.let { FirebaseDatabase.getInstance().reference.child("calls").child(it).child("status").setValue("REJECTED") }
+        cancelCallNotification()
+        ringtone?.stop()
+        finish()
+    }
+
+    private fun cancelCallNotification() {
+        val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        nm.cancel(1002) // ID usado no MessagingService
     }
 
     override fun onDestroy() {
-        stopRingtoneAndVibration()
-        roomName?.let { room ->
-            callStatusListener?.let { listener ->
-                FirebaseDatabase.getInstance().reference.child("calls").child(room)
-                    .removeEventListener(listener)
+        ringtone?.stop()
+        roomId?.let { id -> 
+            callStatusListener?.let { 
+                FirebaseDatabase.getInstance().reference.child("calls").child(id).removeEventListener(it) 
+            } 
+        }
+        super.onDestroy()
+    }
+}
+
+@Composable
+fun IncomingCallScreen(callerName: String, onAccept: () -> Unit, onReject: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxSize().background(Color(0xFF1C1C1E)),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(top = 100.dp)) {
+            Surface(modifier = Modifier.size(120.dp), shape = CircleShape, color = Color.DarkGray) {
+                Icon(Icons.Default.Person, null, modifier = Modifier.padding(30.dp), tint = Color.LightGray)
+            }
+            Spacer(Modifier.height(24.dp))
+            Text(callerName, color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold)
+            Text("Chamada de áudio...", color = Color.Gray, fontSize = 18.sp)
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 100.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            FloatingActionButton(
+                onClick = onReject, 
+                containerColor = Color(0xFFFF3B30), 
+                contentColor = Color.White, 
+                shape = CircleShape,
+                modifier = Modifier.size(72.dp)
+            ) {
+                Icon(Icons.Default.CallEnd, null, modifier = Modifier.size(36.dp))
+            }
+            FloatingActionButton(
+                onClick = onAccept, 
+                containerColor = Color(0xFF34C759), 
+                contentColor = Color.White, 
+                shape = CircleShape,
+                modifier = Modifier.size(72.dp)
+            ) {
+                Icon(Icons.Default.Call, null, modifier = Modifier.size(36.dp))
             }
         }
-        LocalBroadcastManager.getInstance(this).unregisterReceiver(closeReceiver)
-        super.onDestroy()
     }
 }

@@ -66,23 +66,30 @@ class CallActivity : ComponentActivity() {
     }
 
     private fun checkPermissions() {
+        // Apenas áudio é necessário agora
         val permissions = listOf(Manifest.permission.RECORD_AUDIO)
         val toRequest = permissions.filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
         if (toRequest.isNotEmpty()) ActivityCompat.requestPermissions(this, toRequest.toTypedArray(), 101)
     }
     
     private fun toggleMute() {
-        // Obtenha o estado atual do mudo antes de alternar
-        val currentMuted = callStatusState.value == "MUTED" 
-        val isNowMuted = webRTCManager?.toggleMute(!currentMuted) ?: false
-        // O toggleMute do manager deve retornar o novo estado do mudo
+        val currentStatus = callStatusState.value
+        val isCurrentlyMuted = currentStatus == "MUTED"
+        val newMutedState = !isCurrentlyMuted
+        
+        webRTCManager?.toggleMute(newMutedState)
+        
+        // Opcional: Atualizar status no Firebase se quiser que o outro lado saiba que você silenciou
+        // database.child("calls").child(roomId).child("status").setValue(if (newMutedState) "MUTED" else "CONNECTED")
     }
 
     private fun listenForCallStatus() {
         database.child("calls").child(roomId).addValueEventListener(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val status = snapshot.child("status").getValue(String::class.java) ?: "RINGING"
-                callStatusState.value = status
+                if (status != "MUTED") { // Não sobrescrever o estado local de silenciado se vier do Firebase
+                    callStatusState.value = status
+                }
                 if (status == "ENDED" || status == "REJECTED") finish()
             }
             override fun onCancelled(error: DatabaseError) {}
@@ -103,22 +110,113 @@ class CallActivity : ComponentActivity() {
 @Composable
 fun SwiftCallScreen(targetId: String, isOutgoing: Boolean, status: String, onHangUp: () -> Unit, onMute: () -> Unit) {
     var isMuted by remember { mutableStateOf(false) }
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-            Surface(modifier = Modifier.size(120.dp), shape = CircleShape, color = SystemGray4) { Icon(Icons.Default.Person, null, modifier = Modifier.padding(32.dp), tint = Color.White) }
-            Spacer(Modifier.height(32.dp))
-            Text(targetId, color = Color.White, style = MaterialTheme.typography.titleLarge)
-            Text(if (status == "RINGING") (if (isOutgoing) "chamando..." else "chamada recebida") else "em conversa", color = SystemGray, style = MaterialTheme.typography.bodyLarge)
+    
+    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF1C1C1E))) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            // Avatar Placeholder
+            Surface(
+                modifier = Modifier.size(140.dp),
+                shape = CircleShape,
+                color = Color.DarkGray
+            ) {
+                Icon(
+                    Icons.Default.Person,
+                    contentDescription = null,
+                    modifier = Modifier.padding(35.dp),
+                    tint = Color.LightGray
+                )
+            }
+            
+            Spacer(Modifier.height(40.dp))
+            
+            Text(
+                text = targetId,
+                color = Color.White,
+                style = MaterialTheme.typography.headlineMedium
+            )
+            
+            Spacer(Modifier.height(8.dp))
+            
+            val statusText = when (status) {
+                "RINGING" -> if (isOutgoing) "Chamando..." else "Chamada de Voz..."
+                "CONNECTED" -> "Chamada em andamento"
+                "MUTED" -> "Microfone silenciado"
+                else -> "Conectando..."
+            }
+            
+            Text(
+                text = statusText,
+                color = Color.Gray,
+                style = MaterialTheme.typography.bodyLarge
+            )
         }
-        Surface(modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 50.dp, start = 20.dp, end = 20.dp).fillMaxWidth(), shape = RoundedCornerShape(35.dp), color = Color.White.copy(0.15f)) {
-            Row(modifier = Modifier.padding(16.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { isMuted = !isMuted; onMute() }, modifier = Modifier.size(50.dp).clip(CircleShape).background(if (isMuted) Color.White else Color.Transparent)) {
-                    Icon(if (isMuted) Icons.Default.MicOff else Icons.Default.Mic, null, tint = if (isMuted) Color.Black else Color.White)
+
+        // Painel de Controle Inferior
+        Surface(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 60.dp, start = 30.dp, end = 30.dp)
+                .fillMaxWidth(),
+            shape = RoundedCornerShape(40.dp),
+            color = Color.White.copy(alpha = 0.1f)
+        ) {
+            Row(
+                modifier = Modifier.padding(20.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Botão Mudo
+                IconButton(
+                    onClick = { 
+                        isMuted = !isMuted
+                        onMute()
+                    },
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(CircleShape)
+                        .background(if (isMuted) Color.White else Color.Transparent)
+                ) {
+                    Icon(
+                        imageVector = if (isMuted) Icons.Default.MicOff else Icons.Default.Mic,
+                        contentDescription = "Mute",
+                        tint = if (isMuted) Color.Black else Color.White,
+                        modifier = Modifier.size(28.dp)
+                    )
                 }
-                FloatingActionButton(onClick = onHangUp, containerColor = AppleRed, contentColor = Color.White, shape = CircleShape, modifier = Modifier.size(64.dp)) {
-                    Icon(Icons.Default.CallEnd, null, modifier = Modifier.size(30.dp))
+
+                // Botão Encerrar
+                FloatingActionButton(
+                    onClick = onHangUp,
+                    containerColor = Color(0xFFFF3B30), // Apple Red
+                    contentColor = Color.White,
+                    shape = CircleShape,
+                    modifier = Modifier.size(72.dp)
+                ) {
+                    Icon(
+                        Icons.Default.CallEnd,
+                        contentDescription = "End Call",
+                        modifier = Modifier.size(36.dp)
+                    )
                 }
-                Spacer(Modifier.size(50.dp))
+
+                // Botão Viva-voz (Placeholder por enquanto)
+                IconButton(
+                    onClick = { /* Implementar toggle de áudio se necessário */ },
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(CircleShape)
+                ) {
+                    Icon(
+                        Icons.Default.VolumeUp,
+                        contentDescription = "Speaker",
+                        tint = Color.White,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
             }
         }
     }

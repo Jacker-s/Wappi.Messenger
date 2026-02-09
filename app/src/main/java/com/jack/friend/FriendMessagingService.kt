@@ -4,14 +4,12 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import androidx.core.app.Person
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.messaging.FirebaseMessagingService
@@ -21,7 +19,8 @@ import com.google.gson.Gson
 class FriendMessagingService : FirebaseMessagingService() {
 
     companion object {
-        private const val CHANNEL_ID = "MESSAGES_CHANNEL_V7" 
+        private const val CHANNEL_ID = "MESSAGES_CHANNEL_V7"
+        private const val CALL_CHANNEL_ID = "CALL_CHANNEL_V7"
         private const val TAG = "FriendMessagingService"
         private const val GROUP_KEY = "com.jack.friend.MESSAGES_GROUP"
     }
@@ -30,6 +29,8 @@ class FriendMessagingService : FirebaseMessagingService() {
         super.onMessageReceived(remoteMessage)
         
         Log.d(TAG, "Mensagem recebida do FCM: ${remoteMessage.data}")
+
+        createChannels()
 
         val data = remoteMessage.data
         if (data.isNotEmpty()) {
@@ -40,20 +41,9 @@ class FriendMessagingService : FirebaseMessagingService() {
                 try {
                     val message = Gson().fromJson(messageJson, Message::class.java)
                     
-                    // Verifica se é uma chamada - Notificação de sistema removida conforme solicitado
                     if (type == "CALL" || (message.callType != null && message.callStatus == "STARTING")) {
-                        // Tenta abrir a activity diretamente se possível
-                        val fullScreenIntent = Intent(this, IncomingCallActivity::class.java).apply {
-                            putExtra("callMessage", message)
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                        }
-                        try {
-                            startActivity(fullScreenIntent)
-                        } catch (e: Exception) {
-                            Log.d(TAG, "Não foi possível abrir a Activity de chamada diretamente do background")
-                        }
+                        showIncomingCallNotification(message)
                     } else {
-                        // Notificação de mensagem corrigida e melhorada
                         showNotification(message)
                     }
                 } catch (e: Exception) {
@@ -61,6 +51,39 @@ class FriendMessagingService : FirebaseMessagingService() {
                 }
             }
         }
+    }
+
+    private fun showIncomingCallNotification(message: Message) {
+        val intent = Intent(this, IncomingCallActivity::class.java).apply {
+            putExtra("callMessage", message)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+        
+        val fullScreenPendingIntent = PendingIntent.getActivity(
+            this, message.id.hashCode(), intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(this, CALL_CHANNEL_ID)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle("Chamada de ${message.senderName ?: "Alguém"}")
+            .setContentText("Toque para atender")
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setFullScreenIntent(fullScreenPendingIntent, true)
+            .setOngoing(true)
+            .setAutoCancel(false)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+
+        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        
+        try {
+            startActivity(intent)
+        } catch (e: Exception) {
+            Log.e(TAG, "Não foi possível abrir a Activity diretamente: ${e.message}")
+        }
+        
+        notificationManager.notify(message.id.hashCode(), builder.build())
     }
 
     private fun showNotification(message: Message) {
@@ -104,10 +127,8 @@ class FriendMessagingService : FirebaseMessagingService() {
 
         val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         
-        // Notificação individual por chat
         notificationManager.notify(chatId.hashCode(), builder.build())
         
-        // Sumário para agrupar as notificações
         val summaryNotification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setGroup(GROUP_KEY)
@@ -128,6 +149,20 @@ class FriendMessagingService : FirebaseMessagingService() {
                     enableVibration(true)
                 }
                 notificationManager.createNotificationChannel(msgChannel)
+            }
+
+            if (notificationManager.getNotificationChannel(CALL_CHANNEL_ID) == null) {
+                 val callChannel = NotificationChannel(CALL_CHANNEL_ID, "Chamadas", NotificationManager.IMPORTANCE_HIGH).apply {
+                    description = "Notificações de chamadas recebidas"
+                    val audioAttributes = AudioAttributes.Builder()
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                        .build()
+                    setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE), audioAttributes)
+                    enableVibration(true)
+                    lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                }
+                notificationManager.createNotificationChannel(callChannel)
             }
         }
     }

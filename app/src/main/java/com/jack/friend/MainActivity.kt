@@ -75,6 +75,18 @@ class MainActivity : FragmentActivity() {
                 val correctPin = remember { prefs.getString("security_pin", "") ?: "" }
                 var isUnlocked by remember { mutableStateOf(!(isPinEnabled || isBiometricEnabled)) }
 
+                // Iniciar o serviço de mensagens em background se logado
+                LaunchedEffect(isUserLoggedIn) {
+                    if (isUserLoggedIn) {
+                        val serviceIntent = Intent(context, MessagingService::class.java)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            context.startForegroundService(serviceIntent)
+                        } else {
+                            context.startService(serviceIntent)
+                        }
+                    }
+                }
+
                 val permissions = mutableListOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO).apply {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         add(Manifest.permission.POST_NOTIFICATIONS)

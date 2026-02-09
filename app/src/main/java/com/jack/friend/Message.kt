@@ -40,13 +40,13 @@ data class Message(
     var senderPhotoUrl: String? = null,
     var isSticker: Boolean = false,
 
-    // Chamadas
-    var callType: String? = null, // "AUDIO", "VIDEO", "OFFER", "ANSWER", etc.
-    var callStatus: String? = null, // "STARTING", "MISSED", "ENDED"
-    var isCall: Boolean = false,
-    var callRoomId: String? = null,
-
     // Mídia simplificada
     var isMedia: Boolean = false,
-    var mediaUrl: String? = null
+    var mediaUrl: String? = null,
+
+    // Chamadas
+    var isCall: Boolean = false,
+    var callRoomId: String? = null,
+    var callType: String? = null,
+    var callStatus: String? = null
 ) : Serializable

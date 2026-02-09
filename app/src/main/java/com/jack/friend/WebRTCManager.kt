@@ -32,39 +32,47 @@ class WebRTCManager(
             .createInitializationOptions()
         PeerConnectionFactory.initialize(options)
 
+        // Configuração robusta de áudio para Android
         audioDeviceModule = JavaAudioDeviceModule.builder(context)
             .setUseHardwareAcousticEchoCanceler(true)
             .setUseHardwareNoiseSuppressor(true)
+            .setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
             .createAudioDeviceModule()
 
         peerConnectionFactory = PeerConnectionFactory.builder()
             .setAudioDeviceModule(audioDeviceModule)
+            .setOptions(PeerConnectionFactory.Options())
             .createPeerConnectionFactory()
     }
 
     fun startCall() {
-        setupLocalStream()
         createPeerConnection()
+        setupLocalStream()
+        
         val constraints = MediaConstraints().apply {
             mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
             mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "false"))
         }
+        
         peerConnection?.createOffer(object : SimpleSdpObserver() {
             override fun onCreateSuccess(sdp: SessionDescription?) {
                 peerConnection?.setLocalDescription(object : SimpleSdpObserver() {
                     override fun onSetSuccess() {
                         database.child("offer").setValue(mapOf("type" to sdp?.type?.canonicalForm(), "sdp" to sdp?.description))
+                        Log.d("WebRTC", "Offer set and sent")
                     }
                 }, sdp)
             }
         }, constraints)
+        
         listenForAnswer()
         listenForIceCandidates()
     }
 
     fun answerCall() {
-        setupLocalStream()
         createPeerConnection()
+        setupLocalStream()
+        
         database.child("offer").addListenerForSingleValueEvent(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val type = snapshot.child("type").getValue(String::class.java)
@@ -73,6 +81,7 @@ class WebRTCManager(
                     val sessionDescription = SessionDescription(SessionDescription.Type.fromCanonicalForm(type), sdp)
                     peerConnection?.setRemoteDescription(object : SimpleSdpObserver() {
                         override fun onSetSuccess() {
+                            Log.d("WebRTC", "Remote Offer set, creating answer")
                             drainIceCandidates()
                             val constraints = MediaConstraints().apply {
                                 mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
@@ -83,7 +92,7 @@ class WebRTCManager(
                                     peerConnection?.setLocalDescription(object : SimpleSdpObserver() {
                                         override fun onSetSuccess() {
                                             database.child("answer").setValue(mapOf("type" to answerDescription?.type?.canonicalForm(), "sdp" to answerDescription?.description))
-                                            database.child("status").setValue("ANSWERED")
+                                            database.child("status").setValue("CONNECTED")
                                         }
                                     }, answerDescription)
                                 }
@@ -101,20 +110,53 @@ class WebRTCManager(
         val audioSource = peerConnectionFactory?.createAudioSource(MediaConstraints())
         localAudioTrack = peerConnectionFactory?.createAudioTrack("ARDAMSa0", audioSource)
         localAudioTrack?.setEnabled(true)
+        
+        // Adicionar track ao peerConnection
+        peerConnection?.addTrack(localAudioTrack)
         onLocalStream()
     }
 
     private fun createPeerConnection() {
-        val iceServers = listOf(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer())
-        val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply { sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN }
+        val iceServers = listOf(
+            PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
+            PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
+            // Turn servers ajudam em conexões 4G/Redes restritas
+            PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80")
+                .setUsername("openrelayproject")
+                .setPassword("openrelayproject")
+                .createIceServer()
+        )
+        
+        val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
+            sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
+            continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
+        }
+        
         peerConnection = peerConnectionFactory?.createPeerConnection(rtcConfig, object : PeerConnection.Observer {
             override fun onIceCandidate(candidate: IceCandidate?) {
                 candidate?.let {
-                    database.child(localCandidatesPath).push().setValue(mapOf("sdpMid" to it.sdpMid, "sdpMLineIndex" to it.sdpMLineIndex, "candidate" to it.sdp))
+                    database.child(localCandidatesPath).push().setValue(mapOf(
+                        "sdpMid" to it.sdpMid,
+                        "sdpMLineIndex" to it.sdpMLineIndex,
+                        "candidate" to it.sdp
+                    ))
                 }
             }
-            override fun onTrack(transceiver: RtpTransceiver?) { if (transceiver?.receiver?.track()?.kind() == "audio") onRemoteStream() }
-            override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) { Log.d("WebRTC", "ICE: $state") }
+            
+            override fun onTrack(transceiver: RtpTransceiver?) {
+                if (transceiver?.receiver?.track()?.kind() == "audio") {
+                    Log.d("WebRTC", "Remote audio track received")
+                    onRemoteStream()
+                }
+            }
+            
+            override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
+                Log.d("WebRTC", "ICE Connection State: $state")
+                if (state == PeerConnection.IceConnectionState.CONNECTED) {
+                    database.child("status").setValue("CONNECTED")
+                }
+            }
+            
             override fun onSignalingChange(p0: PeerConnection.SignalingState?) {}
             override fun onIceConnectionReceivingChange(p0: Boolean) {}
             override fun onIceGatheringChange(p0: PeerConnection.IceGatheringState?) {}
@@ -124,7 +166,6 @@ class WebRTCManager(
             override fun onDataChannel(p0: DataChannel?) {}
             override fun onRenegotiationNeeded() {}
         })
-        localAudioTrack?.let { peerConnection?.addTrack(it) }
     }
 
     private fun listenForAnswer() {
@@ -132,9 +173,12 @@ class WebRTCManager(
             override fun onDataChange(snapshot: DataSnapshot) {
                 val type = snapshot.child("type").getValue(String::class.java)
                 val sdp = snapshot.child("sdp").getValue(String::class.java)
-                if (type != null && sdp != null) {
+                if (type != null && sdp != null && peerConnection?.signalingState() == PeerConnection.SignalingState.HAVE_LOCAL_OFFER) {
                     peerConnection?.setRemoteDescription(object : SimpleSdpObserver() {
-                        override fun onSetSuccess() { drainIceCandidates() }
+                        override fun onSetSuccess() {
+                            Log.d("WebRTC", "Remote Answer set")
+                            drainIceCandidates()
+                        }
                     }, SessionDescription(SessionDescription.Type.fromCanonicalForm(type), sdp))
                 }
             }
@@ -150,7 +194,11 @@ class WebRTCManager(
                 val idx = s.child("sdpMLineIndex").getValue(Int::class.java) ?: 0
                 if (candidate != null && mid != null) {
                     val iceCandidate = IceCandidate(mid, idx, candidate)
-                    if (peerConnection?.remoteDescription != null) peerConnection?.addIceCandidate(iceCandidate) else pendingIceCandidates.add(iceCandidate)
+                    if (peerConnection?.remoteDescription != null) {
+                        peerConnection?.addIceCandidate(iceCandidate)
+                    } else {
+                        pendingIceCandidates.add(iceCandidate)
+                    }
                 }
             }
             override fun onChildChanged(s: DataSnapshot, p: String?) {}
@@ -160,9 +208,21 @@ class WebRTCManager(
         })
     }
 
-    private fun drainIceCandidates() { pendingIceCandidates.forEach { peerConnection?.addIceCandidate(it) }; pendingIceCandidates.clear() }
-    fun toggleMute(isMuted: Boolean) { localAudioTrack?.setEnabled(!isMuted) }
-    fun onDestroy() { peerConnection?.close(); peerConnectionFactory?.dispose(); audioDeviceModule?.release() }
+    private fun drainIceCandidates() {
+        pendingIceCandidates.forEach { peerConnection?.addIceCandidate(it) }
+        pendingIceCandidates.clear()
+    }
+
+    fun toggleMute(isMuted: Boolean): Boolean {
+        localAudioTrack?.setEnabled(!isMuted)
+        return !isMuted
+    }
+
+    fun onDestroy() {
+        peerConnection?.dispose()
+        peerConnectionFactory?.dispose()
+        audioDeviceModule?.release()
+    }
 
     open class SimpleSdpObserver : SdpObserver {
         override fun onCreateSuccess(p0: SessionDescription?) {}

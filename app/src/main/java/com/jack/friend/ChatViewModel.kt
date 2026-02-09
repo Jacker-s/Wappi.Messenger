@@ -2,6 +2,7 @@ package com.jack.friend
 
 import android.media.MediaRecorder
 import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.auth.FirebaseAuth
@@ -83,7 +84,7 @@ class ChatViewModel : ViewModel() {
                 listenToStatuses()
                 setupPresence(username)
             }
-        }
+        }.addOnFailureListener { Log.e("ChatViewModel", "Erro setupUserSession: ${it.message}") }
     }
 
     private fun loadMyProfile(username: String) {
@@ -170,7 +171,7 @@ class ChatViewModel : ViewModel() {
             override fun onDataChange(snapshot: DataSnapshot) {
                 _isTargetTyping.value = snapshot.getValue(Boolean::class.java) ?: false
             }
-            override fun onCancelled(error: DatabaseError) {}
+            override fun onCancelled(error: DatabaseError) { Log.e("ChatViewModel", "Typing Error: ${error.message}") }
         }
         db.child("typing").child(path).child(target).addValueEventListener(typingListener!!)
     }
@@ -288,7 +289,11 @@ class ChatViewModel : ViewModel() {
         }
     }
 
-    private fun chatPathFor(u1: String, u2: String) = if (u1 < u2) "${u1}_$u2" else "${u2}_$u1"
+    private fun chatPathFor(u1: String, u2: String): String {
+        val user1 = u1.uppercase().trim()
+        val user2 = u2.uppercase().trim()
+        return if (user1 < user2) "${user1}_$user2" else "${user2}_$user1"
+    }
 
     private fun listenToChats(username: String) {
         chatsListener?.let { db.child("chats").child(username).removeEventListener(it) }
@@ -425,41 +430,6 @@ class ChatViewModel : ViewModel() {
         }
     }
 
-    fun startCall(isGroup: Boolean, isVideo: Boolean) {
-        val me = _myUsername.value; val tid = _targetId.value
-        if (me.isEmpty() || tid.isEmpty()) return
-        val callKey = "WapiCall_Private_${if (me < tid) "${me.lowercase()}_${tid.lowercase()}" else "${tid.lowercase()}_${me.lowercase()}"}"
-        
-        val callMessage = Message(
-            id = db.push().key ?: "",
-            senderId = me,
-            receiverId = tid,
-            senderName = _myName.value,
-            timestamp = System.currentTimeMillis(),
-            isCall = true,
-            callType = if (isVideo) "VIDEO" else "AUDIO",
-            callStatus = "STARTING",
-            callRoomId = callKey,
-            isGroup = isGroup
-        )
-        
-        val callData = mapOf(
-            "callerId" to me,
-            "targetId" to tid,
-            "isVideo" to isVideo,
-            "status" to "STARTING",
-            "timestamp" to System.currentTimeMillis(),
-            "callerName" to _myName.value,
-            "callMessage" to callMessage
-        )
-        
-        db.child("calls").child(callKey).setValue(callData)
-        
-        // Também envia como mensagem para garantir o acionamento do FCM
-        val path = if (isGroup) "group_messages/$tid" else "messages/${chatPathFor(me, tid)}"
-        db.child(path).child(callMessage.id).setValue(callMessage)
-    }
-
     private fun listenToStatuses() {
         db.child("status").limitToLast(50).addValueEventListener(object : ValueEventListener {
             override fun onDataChange(s: DataSnapshot) {
@@ -479,5 +449,44 @@ class ChatViewModel : ViewModel() {
                 .distinctBy { it.id }
             _searchResults.value = users
         }
+    }
+
+    fun startCall(isVideo: Boolean, isGroup: Boolean) {
+        val me = _myUsername.value
+        val target = _targetId.value
+        if (me.isEmpty() || target.isEmpty()) return
+
+        val roomId = "WapiCall_Private_${if (me.lowercase() < target.lowercase()) "${me.lowercase()}_${target.lowercase()}" else "${target.lowercase()}_${me.lowercase()}"}"
+        
+        val callData = mapOf(
+            "callerId" to me,
+            "receiverId" to target,
+            "status" to "RINGING",
+            "isVideo" to isVideo,
+            "timestamp" to ServerValue.TIMESTAMP
+        )
+
+        db.child("calls").child(roomId).setValue(callData)
+
+        val msgId = db.push().key ?: return
+        val msg = Message(
+            id = msgId,
+            senderId = me,
+            receiverId = target,
+            text = if (isVideo) "Chamada de vídeo" else "Chamada de áudio",
+            timestamp = System.currentTimeMillis(),
+            isGroup = isGroup,
+            senderName = _myName.value,
+            callRoomId = roomId,
+            callType = if (isVideo) "VIDEO" else "AUDIO",
+            callStatus = "STARTING",
+            isCall = true
+        )
+        
+        // Enviar sinalização dedicada para o receptor tocar
+        db.child("call_notifications").child(target).setValue(msg)
+        
+        val path = if (isGroup) "group_messages/$target" else "messages/${chatPathFor(me, target)}"
+        db.child(path).child(msgId).setValue(msg)
     }
 }
