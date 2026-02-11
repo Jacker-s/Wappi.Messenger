@@ -145,10 +145,17 @@ class ChatViewModel : ViewModel() {
             override fun onDataChange(snapshot: DataSnapshot) {
                 if (snapshot.getValue(Boolean::class.java) == true) {
                     statusRef.onDisconnect().setValue(false)
+                    updatePresence(FriendApplication.isAppInForeground)
                 }
             }
             override fun onCancelled(error: DatabaseError) {}
         })
+        
+        viewModelScope.launch {
+            _myPresenceStatus.collect { 
+                updatePresence(FriendApplication.isAppInForeground)
+            }
+        }
     }
 
     fun logout() {
@@ -541,6 +548,13 @@ class ChatViewModel : ViewModel() {
         }
     }
 
+    fun updatePresence(online: Boolean) {
+        val user = _myUsername.value
+        if (user.isEmpty()) return
+        val isVisible = _myPresenceStatus.value != "Invisível"
+        db.child("users").child(user).child("isOnline").setValue(online && isVisible)
+    }
+
     private fun chatPathFor(u1: String, u2: String): String {
         val user1 = u1.uppercase().trim()
         val user2 = u2.uppercase().trim()
@@ -721,7 +735,10 @@ class ChatViewModel : ViewModel() {
                 _myName.value = name
                 if (photoUrl != null) _myPhotoUrl.value = photoUrl
                 if (status != null) _myStatus.value = status
-                if (presenceStatus != null) _myPresenceStatus.value = presenceStatus
+                if (presenceStatus != null) {
+                    _myPresenceStatus.value = presenceStatus
+                    updatePresence(FriendApplication.isAppInForeground)
+                }
             } catch (e: Exception) {}
         }
     }
@@ -736,11 +753,6 @@ class ChatViewModel : ViewModel() {
                 logout(); callback(true, null)
             } else callback(false, task.exception?.message)
         }
-    }
-
-    fun updatePresence(online: Boolean) {
-        val user = _myUsername.value
-        if (user.isNotEmpty()) db.child("users").child(user).child("isOnline").setValue(online)
     }
 
     fun uploadStatus(uri: Uri) {
@@ -806,18 +818,36 @@ class ChatViewModel : ViewModel() {
     fun deleteChat(friendId: String) {
         val me = _myUsername.value
         if (me.isEmpty()) return
-        db.child("chats").child(me).child(friendId).removeValue()
+        
+        db.child("chats").child(me).child(friendId).get().addOnSuccessListener { snapshot ->
+            val summary = snapshot.getValue(ChatSummary::class.java)
+            if (summary?.isGroup == true) {
+                // Se for grupo, apenas limpa o resumo para o usuário, não remove da lista permanentemente
+                val summaryUpdate = mapOf("lastMessage" to "Conversa excluída", "hasUnread" to false)
+                db.child("chats").child(me).child(friendId).updateChildren(summaryUpdate)
+            } else {
+                db.child("chats").child(me).child(friendId).removeValue()
+            }
+        }
     }
 
     fun clearChat(friendId: String, isGroup: Boolean) {
         val me = _myUsername.value
         if (me.isEmpty()) return
-        val path = if (isGroup) "group_messages/$friendId" else "messages/${chatPathFor(me, friendId)}"
-        db.child(path).removeValue()
         
-        val summaryUpdate = mapOf("lastMessage" to "Conversa limpa", "timestamp" to System.currentTimeMillis(), "hasUnread" to false)
-        db.child("chats").child(me).child(friendId).updateChildren(summaryUpdate)
-        if (!isGroup) db.child("chats").child(friendId).child(me).updateChildren(summaryUpdate)
+        if (isGroup) {
+            // Para grupos, apenas atualizamos o resumo pessoal do usuário.
+            // NÃO removemos as mensagens globais (path) para não apagar para os outros.
+            val summaryUpdate = mapOf("lastMessage" to "Conversa limpa", "timestamp" to System.currentTimeMillis(), "hasUnread" to false)
+            db.child("chats").child(me).child(friendId).updateChildren(summaryUpdate)
+        } else {
+            val path = "messages/${chatPathFor(me, friendId)}"
+            db.child(path).removeValue()
+            
+            val summaryUpdate = mapOf("lastMessage" to "Conversa limpa", "timestamp" to System.currentTimeMillis(), "hasUnread" to false)
+            db.child("chats").child(me).child(friendId).updateChildren(summaryUpdate)
+            db.child("chats").child(friendId).child(me).updateChildren(summaryUpdate)
+        }
     }
 
     fun blockUser(targetId: String) {

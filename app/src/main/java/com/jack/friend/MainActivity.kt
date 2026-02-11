@@ -215,7 +215,7 @@ fun PinLockScreen(correctPin: String, isBiometricEnabled: Boolean, onUnlock: () 
                     val isDel = key == "DEL"
                     Box(modifier = Modifier.size(75.dp).clip(CircleShape).background(LocalChatColors.current.tertiaryBackground).clickable { 
                         view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                        if (isDel) { if (pinInput.isNotEmpty()) pinInput = pinInput.dropLast(1) } else if (pinInput.length < 4) { pinInput += key; if (pinInput.length == 4) { if (pinInput == correctPin) onUnlock() else { pinInput = ""; if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) view.performHapticFeedback(HapticFeedbackConstants.REJECT) } } } 
+                        if (isDel) { if (pinInput.isNotEmpty()) pinInput = pinInput.dropLast(1) } else if (pinInput.length < 4) { pinInput += key; if (pinInput.length == 4) { if (pinInput == correctPin) onUnlock() else { pinInput = ""; if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) view.performHapticFeedback(HapticFeedbackConstants.REJECT) } } }
                     }, contentAlignment = Alignment.Center) { if (isDel) Icon(Icons.AutoMirrored.Filled.Backspace, null, tint = MaterialTheme.colorScheme.onSurface) else Text(key, style = MaterialTheme.typography.titleMedium.copy(fontSize = 28.sp)) }
                 } else Spacer(Modifier.size(75.dp))
             }
@@ -480,7 +480,7 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                                 val isContact = contacts.any { it.id == user.id }
                                 MetaUserItem(user, isContact = isContact, onChatClick = { isSearching = false; viewModel.setTargetId(user.id, false) }, onAddContactClick = { viewModel.addContact(user.id) { _, _ -> } }) 
                             }
-                            else if (!isSearching || searchInput.isEmpty()) items(filteredChats, key = { it.friendId }) { summary -> MetaSwipeChatItem(summary, onDelete = { viewModel.deleteChat(summary.friendId) }, onMarkUnread = { }, onClick = { viewModel.setTargetId(summary.friendId, summary.isGroup) }) }
+                            else if (!isSearching || searchInput.isEmpty()) items(filteredChats, key = { it.friendId }) { summary -> MetaChatItem(summary, onClick = { viewModel.setTargetId(summary.friendId, summary.isGroup) }) }
                         }
                     }
                 }
@@ -662,7 +662,13 @@ fun ContactsScreen(contacts: List<UserProfile>, onContactClick: (UserProfile) ->
                 Row(modifier = Modifier.fillMaxWidth().clickable { onContactClick(contact) }.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box {
                         AsyncImage(model = contact.photoUrl, contentDescription = null, modifier = Modifier.size(50.dp).clip(CircleShape).background(LocalChatColors.current.separator), contentScale = ContentScale.Crop)
-                        if (contact.isOnline) Box(modifier = Modifier.align(Alignment.BottomEnd).size(14.dp).background(MaterialTheme.colorScheme.background, CircleShape).padding(2.dp).background(Color(0xFF31A24C), CircleShape))
+                        val presenceColor = when(contact.presenceStatus) {
+                            "Online" -> Color(0xFF31A24C)
+                            "Ocupado" -> Color(0xFFFA3E3E)
+                            "Ausente" -> Color(0xFFFFB02E)
+                            else -> Color.Gray
+                        }
+                        if (contact.isOnline && contact.presenceStatus != "Invisível") Box(modifier = Modifier.align(Alignment.BottomEnd).size(14.dp).background(MaterialTheme.colorScheme.background, CircleShape).padding(2.dp).background(presenceColor, CircleShape))
                     }
                     Column(modifier = Modifier.padding(start = 12.dp)) {
                         Text(contact.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
@@ -775,22 +781,19 @@ fun MetaStatusRow(statuses: List<UserStatus>, myPhotoUrl: String?, myUsername: S
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun MetaSwipeChatItem(summary: ChatSummary, onDelete: () -> Unit, onMarkUnread: () -> Unit, onClick: () -> Unit) {
-    val dismissState = rememberSwipeToDismissBoxState(confirmValueChange = { when (it) { SwipeToDismissBoxValue.EndToStart -> { onDelete(); true }; SwipeToDismissBoxValue.StartToEnd -> { onMarkUnread(); false }; else -> false } })
-    SwipeToDismissBox(state = dismissState, enableDismissFromStartToEnd = true, enableDismissFromEndToStart = true, backgroundContent = {
-        val color = if (dismissState.dismissDirection == SwipeToDismissBoxValue.EndToStart) Color(0xFFFA3E3E) else if (dismissState.dismissDirection == SwipeToDismissBoxValue.StartToEnd) MessengerBlue else Color.Transparent
-        val alignment = when (dismissState.dismissDirection) { SwipeToDismissBoxValue.EndToStart -> Alignment.CenterEnd; SwipeToDismissBoxValue.StartToEnd -> Alignment.CenterStart; else -> Alignment.Center }
-        val icon = when (dismissState.dismissDirection) { SwipeToDismissBoxValue.EndToStart -> Icons.Default.Delete; SwipeToDismissBoxValue.StartToEnd -> Icons.AutoMirrored.Filled.Chat; else -> Icons.Default.Delete }
-        Box(modifier = Modifier.fillMaxSize().background(color).padding(horizontal = 24.dp), contentAlignment = alignment) { Icon(icon, null, tint = Color.White) }
-    }) { MetaChatItem(summary, onClick) }
-}
-
 @Composable
 fun MetaChatItem(summary: ChatSummary, onClick: () -> Unit) {
     Row(modifier = Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box { AsyncImage(model = summary.friendPhotoUrl, contentDescription = null, modifier = Modifier.size(60.dp).clip(CircleShape).background(LocalChatColors.current.separator), contentScale = ContentScale.Crop); if (!summary.isGroup && summary.isOnline) Box(modifier = Modifier.align(Alignment.BottomEnd).size(16.dp).background(MaterialTheme.colorScheme.background, CircleShape).padding(2.dp).background(Color(0xFF31A24C), CircleShape)) }
+        Box { 
+            AsyncImage(model = summary.friendPhotoUrl, contentDescription = null, modifier = Modifier.size(60.dp).clip(CircleShape).background(LocalChatColors.current.separator), contentScale = ContentScale.Crop)
+            val presenceColor = when(summary.presenceStatus) {
+                "Online" -> Color(0xFF31A24C)
+                "Ocupado" -> Color(0xFFFA3E3E)
+                "Ausente" -> Color(0xFFFFB02E)
+                else -> Color.Gray
+            }
+            if (!summary.isGroup && summary.isOnline && summary.presenceStatus != "Invisível") Box(modifier = Modifier.align(Alignment.BottomEnd).size(16.dp).background(MaterialTheme.colorScheme.background, CircleShape).padding(2.dp).background(presenceColor, CircleShape)) 
+        }
         Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(summary.friendName ?: summary.friendId, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = if (summary.hasUnread) FontWeight.Bold else FontWeight.Normal), maxLines = 1, overflow = TextOverflow.Ellipsis)

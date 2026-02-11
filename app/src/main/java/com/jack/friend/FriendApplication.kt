@@ -6,12 +6,15 @@ import com.cloudinary.android.MediaManager
 class FriendApplication : Application() {
     
     companion object {
+        lateinit var instance: FriendApplication
+            private set
         var isAppInForeground: Boolean = false
         var currentOpenedChatId: String? = null
     }
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         
         val config = mapOf(
             "cloud_name" to "dagdvifyz",
