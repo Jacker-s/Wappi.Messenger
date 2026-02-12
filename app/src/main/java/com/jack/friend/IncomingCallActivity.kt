@@ -20,6 +20,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.rounded.Call
+import androidx.compose.material.icons.rounded.CallEnd
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -162,37 +164,36 @@ class IncomingCallActivity : ComponentActivity() {
 
 @Composable
 fun IncomingCallScreen(callerName: String, callerPhotoUrl: String?, onAccept: () -> Unit, onReject: () -> Unit) {
-    Box(modifier = Modifier.fillMaxSize().background(MetaBlack)) {
+    Box(modifier = Modifier.fillMaxSize().background(iOSSystemBackgroundDark)) {
         // Subtle background gradient
-        Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(MetaBlack, MessengerBlue.copy(0.2f), MetaBlack))))
+        Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black, iOSBlue.copy(0.15f), Color.Black))))
         
         Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.SpaceBetween) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(top = 120.dp)) {
                 Box(contentAlignment = Alignment.Center) {
-                    // Pulse animation could be here, but keeping it simple as requested
                     AsyncImage(
                         model = callerPhotoUrl,
                         contentDescription = null,
-                        modifier = Modifier.size(140.dp).clip(CircleShape).background(MetaDarkSurface),
+                        modifier = Modifier.size(120.dp).clip(CircleShape).background(Color(0xFF1C1C1E)),
                         contentScale = ContentScale.Crop
                     )
                 }
                 Spacer(Modifier.height(24.dp))
                 Text(callerName, color = Color.White, style = MaterialTheme.typography.displayLarge, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(8.dp))
-                Text("Chamada do Friend", color = MetaGray4, style = MaterialTheme.typography.bodyLarge)
+                Text("Friend Audio...", color = Color.White.copy(alpha = 0.6f), style = MaterialTheme.typography.bodyLarge)
             }
             
             Row(modifier = Modifier.fillMaxWidth().padding(bottom = 100.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    FloatingActionButton(onClick = onReject, containerColor = Color(0xFFFA3E3E), contentColor = Color.White, shape = CircleShape, modifier = Modifier.size(72.dp)) { Icon(Icons.Default.CallEnd, null, modifier = Modifier.size(36.dp)) }
+                    FloatingActionButton(onClick = onReject, containerColor = iOSRed, contentColor = Color.White, shape = CircleShape, modifier = Modifier.size(75.dp)) { Icon(Icons.Rounded.CallEnd, null, modifier = Modifier.size(35.dp)) }
                     Spacer(Modifier.height(12.dp))
-                    Text("Recusar", color = Color.White, style = MaterialTheme.typography.labelSmall)
+                    Text("Decline", color = Color.White, style = MaterialTheme.typography.labelSmall)
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    FloatingActionButton(onClick = onAccept, containerColor = Color(0xFF31A24C), contentColor = Color.White, shape = CircleShape, modifier = Modifier.size(72.dp)) { Icon(Icons.Default.Call, null, modifier = Modifier.size(36.dp)) }
+                    FloatingActionButton(onClick = onAccept, containerColor = iOSGreen, contentColor = Color.White, shape = CircleShape, modifier = Modifier.size(75.dp)) { Icon(Icons.Rounded.Call, null, modifier = Modifier.size(35.dp)) }
                     Spacer(Modifier.height(12.dp))
-                    Text("Aceitar", color = Color.White, style = MaterialTheme.typography.labelSmall)
+                    Text("Accept", color = Color.White, style = MaterialTheme.typography.labelSmall)
                 }
             }
         }

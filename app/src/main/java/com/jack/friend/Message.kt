@@ -1,5 +1,6 @@
 package com.jack.friend
 
+import com.google.firebase.database.Exclude
 import com.google.firebase.database.IgnoreExtraProperties
 import com.google.firebase.database.PropertyName
 import java.io.Serializable
@@ -49,5 +50,9 @@ data class Message(
     var callRoomId: String? = null,
     var callType: String? = null,
     var callStatus: String? = null,
-    var expiryTime: Long? = null
+    var expiryTime: Long? = null,
+
+    @get:Exclude
+    @set:Exclude
+    var localAudioPath: String? = null
 ) : Serializable

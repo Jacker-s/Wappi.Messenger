@@ -14,13 +14,17 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.database.*
 import com.google.firebase.storage.FirebaseStorage
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileOutputStream
+import java.net.URL
 import java.util.UUID
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
@@ -446,6 +450,7 @@ class ChatViewModel : ViewModel() {
                 if (url != null) {
                     val msgId = db.push().key ?: return@launch
                     val msg = Message(id = msgId, senderId = me, receiverId = target, audioUrl = url, timestamp = System.currentTimeMillis(), isGroup = isGroup, senderName = _myName.value, expiryTime = if (tempDurationHours > 0) System.currentTimeMillis() + (tempDurationHours * 3600000) else null)
+                    msg.localAudioPath = file.absolutePath
                     sendMessageObject(msg)
                 }
             } catch (e: Exception) { 
@@ -555,6 +560,33 @@ class ChatViewModel : ViewModel() {
         db.child("users").child(user).child("isOnline").setValue(online && isVisible)
     }
 
+    fun deleteGroup(groupId: String, callback: (Boolean, String?) -> Unit) {
+        val me = _myUsername.value
+        if (me.isEmpty()) return
+        
+        db.child("groups").child(groupId).get().addOnSuccessListener { snapshot ->
+            val group = snapshot.getValue(Group::class.java)
+            if (group != null && group.createdBy == me) {
+                viewModelScope.launch {
+                    try {
+                        db.child("group_messages").child(groupId).removeValue()
+                        group.members.keys.forEach { member ->
+                            db.child("chats").child(member).child(groupId).removeValue()
+                        }
+                        db.child("groups").child(groupId).removeValue().await()
+                        callback(true, null)
+                    } catch (e: Exception) {
+                        callback(false, e.message)
+                    }
+                }
+            } else {
+                callback(false, "Apenas o criador pode excluir o grupo")
+            }
+        }.addOnFailureListener {
+            callback(false, it.message)
+        }
+    }
+
     private fun chatPathFor(u1: String, u2: String): String {
         val user1 = u1.uppercase().trim()
         val user2 = u2.uppercase().trim()
@@ -640,12 +672,45 @@ class ChatViewModel : ViewModel() {
             override fun onDataChange(s: DataSnapshot) { 
                 val now = System.currentTimeMillis()
                 val msgs = s.children.mapNotNull { it.getValue(Message::class.java) }
-                _messages.value = msgs.filter { it.expiryTime == null || it.expiryTime!! > now } 
+                val filtered = msgs.filter { it.expiryTime == null || it.expiryTime!! > now } 
+                
+                filtered.forEach { msg ->
+                    if (msg.audioUrl != null) downloadAudioIfNeeded(msg)
+                }
+
+                _messages.value = filtered
                 msgs.forEach { if (it.expiryTime != null && it.expiryTime!! < now) db.child(path).child(it.id).removeValue() }
             }
             override fun onCancelled(e: DatabaseError) {}
         }
         db.child(path).addValueEventListener(messagesListener!!)
+    }
+
+    private fun downloadAudioIfNeeded(msg: Message) {
+        val audioUrl = msg.audioUrl ?: return
+        val fileName = "audio_${msg.id}.m4a"
+        val cacheFile = File(FriendApplication.instance.cacheDir, fileName)
+        
+        if (cacheFile.exists()) {
+            msg.localAudioPath = cacheFile.absolutePath
+            return
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                URL(audioUrl).openStream().use { input ->
+                    FileOutputStream(cacheFile).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                withContext(Dispatchers.Main) {
+                    msg.localAudioPath = cacheFile.absolutePath
+                    _messages.value = _messages.value.toList()
+                }
+            } catch (e: Exception) {
+                Log.e("ChatViewModel", "Download audio failed: ${e.message}")
+            }
+        }
     }
 
     fun signUp(email: String, password: String, username: String, imageUri: Uri?, callback: (Boolean, String?) -> Unit) {

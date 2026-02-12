@@ -29,17 +29,17 @@ data class ChatColors(
 
 val LocalChatColors = staticCompositionLocalOf {
     ChatColors(
-        bubbleMe = MessengerBlue,
+        bubbleMe = iOSBlue,
         bubbleOther = MessengerBubbleOther,
         background = Color.White,
         topBar = Color.White,
         onTopBar = Color.Black,
-        primary = MessengerBlue,
-        secondaryBackground = MetaGray1,
-        tertiaryBackground = MetaGray2,
-        separator = MetaGray3,
+        primary = iOSBlue,
+        secondaryBackground = iOSSystemBackgroundLight,
+        tertiaryBackground = Color.White,
+        separator = Color(0xFFC6C6C8),
         textPrimary = Color.Black,
-        textSecondary = MetaGray4
+        textSecondary = iOSGray
     )
 }
 
@@ -47,35 +47,35 @@ val AppTypography = Typography(
     displayLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Bold,
-        fontSize = 30.sp,
+        fontSize = 34.sp,
         letterSpacing = (-0.5).sp
     ),
     titleLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Bold,
-        fontSize = 24.sp,
+        fontSize = 22.sp,
         letterSpacing = (-0.3).sp
     ),
     titleMedium = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.SemiBold,
-        fontSize = 18.sp
+        fontSize = 17.sp
     ),
     bodyLarge = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Normal,
-        fontSize = 16.sp
+        fontSize = 17.sp
     ),
     bodyMedium = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Normal,
-        fontSize = 14.sp
+        fontSize = 15.sp
     ),
     labelSmall = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Medium,
-        fontSize = 12.sp,
-        color = MetaGray4
+        fontSize = 13.sp,
+        color = iOSGray
     )
 )
 
@@ -109,36 +109,36 @@ fun FriendTheme(
 
     val colorScheme = if (actualDark) {
         darkColorScheme(
-            primary = MessengerBlue,
-            background = MetaBlack,
-            surface = MetaDarkGray,
+            primary = iOSBlue,
+            background = iOSSystemBackgroundDark,
+            surface = iOSSystemGroupedBackgroundDark,
             onSurface = Color.White,
-            onSurfaceVariant = MetaGray4,
-            outline = MetaDarkSurface
+            onSurfaceVariant = iOSGray,
+            outline = Color(0xFF38383A)
         )
     } else {
         lightColorScheme(
-            primary = MessengerBlue,
-            background = Color.White,
-            surface = Color.White,
+            primary = iOSBlue,
+            background = iOSSystemBackgroundLight,
+            surface = iOSSystemGroupedBackgroundLight,
             onSurface = Color.Black,
-            onSurfaceVariant = MetaGray4,
-            outline = MetaGray3
+            onSurfaceVariant = iOSGray,
+            outline = Color(0xFFC6C6C8)
         )
     }
 
     val chatColors = ChatColors(
-        bubbleMe = MessengerBlue,
+        bubbleMe = iOSBlue,
         bubbleOther = if (actualDark) MessengerBubbleOtherDark else MessengerBubbleOther,
-        background = if (actualDark) MetaBlack else Color.White,
-        topBar = if (actualDark) MetaBlack else Color.White,
+        background = if (actualDark) iOSSystemBackgroundDark else iOSSystemBackgroundLight,
+        topBar = if (actualDark) Color.Black else Color.White,
         onTopBar = if (actualDark) Color.White else Color.Black,
-        primary = MessengerBlue,
-        secondaryBackground = if (actualDark) MetaDarkSurface else MetaGray1,
-        tertiaryBackground = if (actualDark) MetaDarkGray else MetaGray2,
-        separator = if (actualDark) MetaDarkSurface else MetaGray3,
+        primary = iOSBlue,
+        secondaryBackground = if (actualDark) iOSSystemGroupedBackgroundDark else iOSSystemGroupedBackgroundLight,
+        tertiaryBackground = if (actualDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA),
+        separator = if (actualDark) Color(0xFF38383A) else Color(0xFFC6C6C8),
         textPrimary = if (actualDark) Color.White else Color.Black,
-        textSecondary = MetaGray4
+        textSecondary = iOSGray
     )
 
     CompositionLocalProvider(LocalChatColors provides chatColors) {

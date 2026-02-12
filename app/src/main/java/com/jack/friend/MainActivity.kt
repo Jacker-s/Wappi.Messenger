@@ -1,14 +1,16 @@
 package com.jack.friend
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
+import android.util.Log
 import android.view.HapticFeedbackConstants
-import android.view.MotionEvent
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
@@ -21,6 +23,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -36,13 +39,16 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.*
+import androidx.compose.material.icons.automirrored.rounded.*
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
@@ -53,7 +59,6 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -77,7 +82,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.jack.friend.ui.theme.*
-import com.google.android.gms.common.api.ApiException
 import kotlinx.coroutines.delay
 import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
@@ -154,7 +158,7 @@ fun LoginScreen(viewModel: ChatViewModel) {
 
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 30.dp).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Top) {
         Spacer(modifier = Modifier.height(100.dp))
-        Icon(Icons.AutoMirrored.Filled.Chat, null, modifier = Modifier.size(80.dp), tint = MessengerBlue)
+        Icon(Icons.Rounded.ChatBubble, null, modifier = Modifier.size(80.dp), tint = MessengerBlue)
         Spacer(modifier = Modifier.height(20.dp))
         Text(text = if (isSignUp) "Crie sua conta" else "Bem-vindo de volta", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
         Spacer(modifier = Modifier.height(40.dp))
@@ -162,7 +166,7 @@ fun LoginScreen(viewModel: ChatViewModel) {
         if (isSignUp) {
             Box(modifier = Modifier.size(110.dp).clip(CircleShape).background(LocalChatColors.current.separator).clickable { photoLauncher.launch("image/*") }, contentAlignment = Alignment.Center) {
                 if (selectedImageUri != null) AsyncImage(model = selectedImageUri, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                else Icon(Icons.Default.AddAPhoto, null, modifier = Modifier.size(36.dp), tint = MessengerBlue)
+                else Icon(Icons.Rounded.PhotoCamera, null, modifier = Modifier.size(36.dp), tint = MessengerBlue)
             }
             Spacer(modifier = Modifier.height(30.dp))
             MetaTextField(username, { username = it }, "Nome de usuário")
@@ -198,12 +202,12 @@ fun PinLockScreen(correctPin: String, isBiometricEnabled: Boolean, onUnlock: () 
         val biometricPrompt = androidx.biometric.BiometricPrompt(fragmentActivity, executor, object : androidx.biometric.BiometricPrompt.AuthenticationCallback() {
             override fun onAuthenticationSucceeded(result: androidx.biometric.BiometricPrompt.AuthenticationResult) { super.onAuthenticationSucceeded(result); onUnlock() }
         })
-        val promptInfo = androidx.biometric.BiometricPrompt.PromptInfo.Builder().setTitle("Bloqueio de Segurança").setSubtitle("Use biometria para entrar").setNegativeButtonText("Usar PIN").build()
+        val promptInfo = androidx.biometric.BiometricPrompt.PromptInfo.Builder().setTitle("Bloqueio de Segurança").setSubtitle("Uma biometria para entrar").setNegativeButtonText("Usar PIN").build()
         biometricPrompt.authenticate(promptInfo)
     }
     LaunchedEffect(Unit) { if (isBiometricEnabled) showBiometricPrompt() }
     Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Icon(Icons.Default.Lock, null, modifier = Modifier.size(64.dp), tint = MessengerBlue)
+        Icon(Icons.Rounded.Lock, null, modifier = Modifier.size(64.dp), tint = MessengerBlue)
         Spacer(modifier = Modifier.height(24.dp)); Text("App Protegido", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(32.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) { repeat(4) { index -> Box(modifier = Modifier.size(16.dp).clip(CircleShape).background(if (pinInput.length > index) MessengerBlue else LocalChatColors.current.separator)) } }
@@ -215,12 +219,12 @@ fun PinLockScreen(correctPin: String, isBiometricEnabled: Boolean, onUnlock: () 
                     val isDel = key == "DEL"
                     Box(modifier = Modifier.size(75.dp).clip(CircleShape).background(LocalChatColors.current.tertiaryBackground).clickable { 
                         view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                        if (isDel) { if (pinInput.isNotEmpty()) pinInput = pinInput.dropLast(1) } else if (pinInput.length < 4) { pinInput += key; if (pinInput.length == 4) { if (pinInput == correctPin) onUnlock() else { pinInput = ""; if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) view.performHapticFeedback(HapticFeedbackConstants.REJECT) } } }
+                        if (isDel) { if (pinInput.isNotEmpty()) pinInput = pinInput.dropLast(1) } else if (pinInput.length < 4) { pinInput += key; if (pinInput.length == 4) { if (pinInput == correctPin) onUnlock() else { pinInput = ""; if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) view.performHapticFeedback(HapticFeedbackConstants.REJECT) } } } 
                     }, contentAlignment = Alignment.Center) { if (isDel) Icon(Icons.AutoMirrored.Filled.Backspace, null, tint = MaterialTheme.colorScheme.onSurface) else Text(key, style = MaterialTheme.typography.titleMedium.copy(fontSize = 28.sp)) }
                 } else Spacer(Modifier.size(75.dp))
             }
         }
-        if (isBiometricEnabled) IconButton(onClick = { showBiometricPrompt() }, modifier = Modifier.padding(top = 24.dp)) { Icon(Icons.Default.Fingerprint, null, modifier = Modifier.size(40.dp), tint = MessengerBlue) }
+        if (isBiometricEnabled) IconButton(onClick = { showBiometricPrompt() }, modifier = Modifier.padding(top = 24.dp)) { Icon(Icons.Rounded.Fingerprint, null, modifier = Modifier.size(40.dp), tint = MessengerBlue) }
     }
 }
 
@@ -245,6 +249,7 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
     var showOptionsMenu by remember { mutableStateOf(false) }
     var tempMessageDuration by remember { mutableIntStateOf(0) }
     var showClearChatDialog by remember { mutableStateOf(false) }
+    var showDeleteGroupDialog by remember { mutableStateOf(false) }
     var showContacts by remember { mutableStateOf(false) }
     var showAddContactDialog by remember { mutableStateOf(false) }
     var showCreateGroup by remember { mutableStateOf(false) }
@@ -311,9 +316,9 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                                         else if (targetGroup != null) Text("${targetGroup?.members?.size ?: 0} membros", style = MaterialTheme.typography.labelSmall, color = MetaGray4)
                                         else if (targetProfile != null) {
                                             val presenceColor = when(targetProfile?.presenceStatus) {
-                                                "Online" -> Color(0xFF31A24C)
-                                                "Ocupado" -> Color(0xFFFA3E3E)
-                                                "Ausente" -> Color(0xFFFFB02E)
+                                                "Online" -> iOSGreen
+                                                "Ocupado" -> iOSRed
+                                                "Ausente" -> iOSOrange
                                                 else -> MetaGray4
                                             }
                                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -335,9 +340,9 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                             }
                         },
                         navigationIcon = { 
-                            if (targetId.isNotEmpty()) IconButton(onClick = { viewModel.setTargetId("") }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = MessengerBlue) }
-                            else if (showCreateGroup) IconButton(onClick = { showCreateGroup = false }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = MessengerBlue) }
-                            else if (showContacts) IconButton(onClick = { showContacts = false }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = MessengerBlue) }
+                            if (targetId.isNotEmpty()) IconButton(onClick = { viewModel.setTargetId("") }) { Icon(Icons.AutoMirrored.Rounded.ArrowBackIos, null, tint = MessengerBlue) }
+                            else if (showCreateGroup) IconButton(onClick = { showCreateGroup = false }) { Icon(Icons.AutoMirrored.Rounded.ArrowBackIos, null, tint = MessengerBlue) }
+                            else if (showContacts) IconButton(onClick = { showContacts = false }) { Icon(Icons.AutoMirrored.Rounded.ArrowBackIos, null, tint = MessengerBlue) }
                             else IconButton(onClick = { context.startActivity(Intent(context, SettingsActivity::class.java)) }) { AsyncImage(model = myPhotoUrl, contentDescription = null, modifier = Modifier.size(32.dp).clip(CircleShape).background(LocalChatColors.current.separator), contentScale = ContentScale.Crop) }
                         },
                         actions = {
@@ -352,22 +357,55 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                                             putExtra("isOutgoing", true)
                                             putExtra("isVideo", false)
                                         })
-                                    }) { Icon(Icons.Default.Call, null, tint = MessengerBlue) }
+                                    }) { Icon(Icons.Rounded.Phone, null, tint = MessengerBlue) }
                                 }
                                 Box {
-                                    IconButton(onClick = { showOptionsMenu = true }) { Icon(Icons.Default.Info, null, tint = MessengerBlue) }
-                                    DropdownMenu(expanded = showOptionsMenu, onDismissRequest = { showOptionsMenu = false }, modifier = Modifier.background(MaterialTheme.colorScheme.surface, RoundedCornerShape(12.dp))) {
-                                        DropdownMenuItem(text = { Text("Limpar conversa") }, leadingIcon = { Icon(Icons.Default.CleaningServices, null) }, onClick = { showOptionsMenu = false; showClearChatDialog = true })
-                                        if (targetGroup == null) {
-                                            DropdownMenuItem(text = { Text("Mensagens Temporárias") }, leadingIcon = { Icon(Icons.Default.Timer, null) }, onClick = { tempMessageDuration = if(tempMessageDuration == 0) 24 else 0; showOptionsMenu = false })
+                                    IconButton(onClick = { showOptionsMenu = true }) { 
+                                        Icon(
+                                            imageVector = Icons.Rounded.MoreHoriz, 
+                                            contentDescription = null, 
+                                            tint = MessengerBlue,
+                                            modifier = Modifier.size(26.dp)
+                                        ) 
+                                    }
+                                    DropdownMenu(
+                                        expanded = showOptionsMenu, 
+                                        onDismissRequest = { showOptionsMenu = false }, 
+                                        modifier = Modifier.background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp)).width(220.dp).border(0.5.dp, LocalChatColors.current.separator, RoundedCornerShape(16.dp))
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text("Limpar conversa", style = MaterialTheme.typography.bodyLarge) }, 
+                                            leadingIcon = { Icon(Icons.Rounded.DeleteSweep, null, tint = MessengerBlue) }, 
+                                            onClick = { showOptionsMenu = false; showClearChatDialog = true }
+                                        )
+                                        if (targetGroup != null) {
+                                            if (targetGroup?.createdBy == myUsername) {
+                                                HorizontalDivider(modifier = Modifier.padding(horizontal = 12.dp), thickness = 0.5.dp, color = LocalChatColors.current.separator)
+                                                DropdownMenuItem(
+                                                    text = { Text("Apagar Grupo", color = iOSRed, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold) }, 
+                                                    leadingIcon = { Icon(Icons.Rounded.DeleteForever, null, tint = iOSRed) }, 
+                                                    onClick = { showOptionsMenu = false; showDeleteGroupDialog = true }
+                                                )
+                                            }
+                                        } else {
+                                            DropdownMenuItem(
+                                                text = { Text("Mensagens Temporárias", style = MaterialTheme.typography.bodyLarge) }, 
+                                                leadingIcon = { Icon(Icons.Rounded.Timer, null) }, 
+                                                onClick = { tempMessageDuration = if(tempMessageDuration == 0) 24 else 0; showOptionsMenu = false }
+                                            )
+                                            HorizontalDivider(modifier = Modifier.padding(horizontal = 12.dp), thickness = 0.5.dp, color = LocalChatColors.current.separator)
                                             val isBlocked = blockedUsers.contains(targetId)
-                                            DropdownMenuItem(text = { Text(if(isBlocked) "Desbloquear" else "Bloquear") }, leadingIcon = { Icon(if(isBlocked) Icons.Default.LockOpen else Icons.Default.Block, null, tint = Color(0xFFFA3E3E)) }, onClick = { if(isBlocked) viewModel.unblockUser(targetId) else viewModel.blockUser(targetId); showOptionsMenu = false })
+                                            DropdownMenuItem(
+                                                text = { Text(if(isBlocked) "Desbloquear" else "Bloquear", color = iOSRed, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold) }, 
+                                                leadingIcon = { Icon(if(isBlocked) Icons.Default.LockOpen else Icons.Default.Block, null, tint = iOSRed) }, 
+                                                onClick = { if(isBlocked) viewModel.unblockUser(targetId) else viewModel.blockUser(targetId); showOptionsMenu = false }
+                                            )
                                         }
                                     }
                                 }
                             } else if (showContacts && !showCreateGroup) {
-                                IconButton(onClick = { showCreateGroup = true }) { Icon(Icons.Default.GroupAdd, null, tint = MessengerBlue) }
-                                IconButton(onClick = { showAddContactDialog = true }) { Icon(Icons.Default.PersonAdd, null, tint = MessengerBlue) }
+                                IconButton(onClick = { showCreateGroup = true }) { Icon(Icons.Rounded.GroupAdd, null, tint = MessengerBlue) }
+                                IconButton(onClick = { showAddContactDialog = true }) { Icon(Icons.Rounded.PersonAdd, null, tint = MessengerBlue) }
                             }
                         },
                         colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = LocalChatColors.current.topBar)
@@ -383,7 +421,7 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
         },
         floatingActionButton = {
             if (targetId.isEmpty() && !showContacts && viewingStatuses == null) {
-                FloatingActionButton(onClick = { showContacts = true }, containerColor = MessengerBlue, contentColor = Color.White, shape = CircleShape) { Icon(Icons.Default.Chat, null) }
+                FloatingActionButton(onClick = { showContacts = true }, containerColor = MessengerBlue, contentColor = Color.White, shape = CircleShape) { Icon(Icons.Rounded.Add, null) }
             }
         },
         bottomBar = { 
@@ -422,7 +460,7 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                     }
                     MetaInput(
                         text = textState, 
-                        onTextChange = { textState = it; viewModel.setTyping(it.isNotEmpty()) }, 
+                        onValueChange = { textState = it; viewModel.setTyping(it.isNotEmpty()) }, 
                         onAddClick = { showAttachmentMenu = true }, 
                         onSend = { 
                             if (textState.isNotBlank()) { 
@@ -435,7 +473,7 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                             } 
                         }, 
                         onAudioStart = { viewModel.startRecording(context.cacheDir) }, 
-                        onAudioStop = { cancel -> viewModel.stopRecording(targetGroup != null, tempMessageDuration, cancel) }, 
+                        onAudioStop = { cancel -> viewModel.stopRecording(targetGroup != null, tempDurationHours = tempMessageDuration, cancel = cancel) },
                         onLikeClick = { viewModel.sendMessage("👍", targetGroup != null, tempDurationHours = tempMessageDuration, replyingTo = replyingTo); replyingTo = null },
                         recordingDuration = recordingDuration
                     ) 
@@ -480,7 +518,14 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                                 val isContact = contacts.any { it.id == user.id }
                                 MetaUserItem(user, isContact = isContact, onChatClick = { isSearching = false; viewModel.setTargetId(user.id, false) }, onAddContactClick = { viewModel.addContact(user.id) { _, _ -> } }) 
                             }
-                            else if (!isSearching || searchInput.isEmpty()) items(filteredChats, key = { it.friendId }) { summary -> MetaChatItem(summary, onClick = { viewModel.setTargetId(summary.friendId, summary.isGroup) }) }
+                            else if (!isSearching || searchInput.isEmpty()) itemsIndexed(filteredChats, key = { _, s -> s.friendId }) { index, summary -> 
+                                Column {
+                                    MetaChatItem(summary, onClick = { viewModel.setTargetId(summary.friendId, summary.isGroup) })
+                                    if (index < filteredChats.size - 1) {
+                                        HorizontalDivider(modifier = Modifier.padding(start = 88.dp), thickness = 0.5.dp, color = LocalChatColors.current.separator)
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -518,9 +563,10 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                     }
                 }
             }
-            if (showAttachmentMenu) { ModalBottomSheet(onDismissRequest = { showAttachmentMenu = false }, containerColor = LocalChatColors.current.secondaryBackground, dragHandle = { BottomSheetDefaults.DragHandle() }) { Row(modifier = Modifier.fillMaxWidth().padding(bottom = 40.dp, top = 20.dp), horizontalArrangement = Arrangement.SpaceEvenly) { AttachmentItem(icon = Icons.Default.CameraAlt, label = "Câmera", color = Color(0xFFFA3E3E)) { showAttachmentMenu = false; cameraLauncher.launch() }; AttachmentItem(icon = Icons.Default.Photo, label = "Galeria", color = InstagramPurple) { showAttachmentMenu = false; imageLauncher.launch("image/*") } } } }
-            if (fullScreenImageUrl != null) { Box(modifier = Modifier.fillMaxSize().background(Color.Black).clickable { fullScreenImageUrl = null }, contentAlignment = Alignment.Center) { AsyncImage(model = fullScreenImageUrl, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit); IconButton(onClick = { fullScreenImageUrl = null }, modifier = Modifier.align(Alignment.TopEnd).padding(40.dp)) { Icon(Icons.Default.Close, null, tint = Color.White, modifier = Modifier.size(30.dp)) } } }
-            if (showClearChatDialog) { AlertDialog(onDismissRequest = { showClearChatDialog = false }, title = { Text("Limpar Conversa") }, text = { Text("Isso apagará todas as mensagens para ambos.") }, confirmButton = { TextButton(onClick = { viewModel.clearChat(targetId, targetGroup != null); showClearChatDialog = false }) { Text("Limpar", color = Color(0xFFFA3E3E)) } }, dismissButton = { TextButton(onClick = { showClearChatDialog = false }) { Text("Cancelar") } }) }
+            if (showAttachmentMenu) { ModalBottomSheet(onDismissRequest = { showAttachmentMenu = false }, containerColor = LocalChatColors.current.secondaryBackground, dragHandle = { BottomSheetDefaults.DragHandle() }) { Row(modifier = Modifier.fillMaxWidth().padding(bottom = 40.dp, top = 20.dp), horizontalArrangement = Arrangement.SpaceEvenly) { AttachmentItem(icon = Icons.Rounded.PhotoCamera, label = "Câmera", color = iOSRed) { showAttachmentMenu = false; cameraLauncher.launch() }; AttachmentItem(icon = Icons.Rounded.Image, label = "Galeria", color = Color(0xFF5856D6)) { showAttachmentMenu = false; imageLauncher.launch("image/*") } } } }
+            if (fullScreenImageUrl != null) { Box(modifier = Modifier.fillMaxSize().background(Color.Black).clickable { fullScreenImageUrl = null }, contentAlignment = Alignment.Center) { AsyncImage(model = fullScreenImageUrl, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit); IconButton(onClick = { fullScreenImageUrl = null }, modifier = Modifier.align(Alignment.TopEnd).padding(40.dp)) { Icon(Icons.Rounded.Close, null, tint = Color.White, modifier = Modifier.size(30.dp)) } } }
+            if (showClearChatDialog) { AlertDialog(onDismissRequest = { showClearChatDialog = false }, title = { Text("Limpar Conversa") }, text = { Text("Isso apagará todas as mensagens para ambos.") }, confirmButton = { TextButton(onClick = { viewModel.clearChat(targetId, targetGroup != null); showClearChatDialog = false }) { Text("Limpar", color = iOSRed) } }, dismissButton = { TextButton(onClick = { showClearChatDialog = false }) { Text("Cancelar") } }) }
+            if (showDeleteGroupDialog) { AlertDialog(onDismissRequest = { showDeleteGroupDialog = false }, title = { Text("Apagar Grupo") }, text = { Text("Isso excluirá o grupo e todas as mensagens para todos os membros.") }, confirmButton = { TextButton(onClick = { viewModel.deleteGroup(targetId) { success, error -> if (success) { showDeleteGroupDialog = false; viewModel.setTargetId("") } else { Toast.makeText(context, error ?: "Erro", Toast.LENGTH_SHORT).show() } };  }) { Text("Apagar", color = iOSRed) } }, dismissButton = { TextButton(onClick = { showDeleteGroupDialog = false }) { Text("Cancelar") } }) }
             if (showAddContactDialog) { AddContactDialog(onDismiss = { showAddContactDialog = false }, onAdd = { username -> viewModel.addContact(username) { success, error -> if (success) showAddContactDialog = false else Toast.makeText(context, error ?: "Erro ao adicionar", Toast.LENGTH_SHORT).show() } }) }
             
             if (viewingStatuses != null) {
@@ -546,7 +592,7 @@ fun CreateGroupScreen(contacts: List<UserProfile>, onCreate: (String, List<Strin
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(modifier = Modifier.size(64.dp).clip(CircleShape).background(LocalChatColors.current.separator).clickable { photoLauncher.launch("image/*") }, contentAlignment = Alignment.Center) {
                 if (selectedImageUri != null) AsyncImage(model = selectedImageUri, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                else Icon(Icons.Default.CameraAlt, null, tint = MessengerBlue)
+                else Icon(Icons.Rounded.PhotoCamera, null, tint = MessengerBlue)
             }
             Spacer(Modifier.width(16.dp))
             MetaTextField(groupName, { groupName = it }, "Nome do grupo")
@@ -600,7 +646,7 @@ fun TelegramTabs(selected: String, onSelect: (String) -> Unit) {
 fun StatusViewer(userStatuses: List<UserStatus>, myUsername: String, onClose: () -> Unit, onDelete: (String) -> Unit) {
     var currentIndex by remember { mutableIntStateOf(0) }
     val currentStatus = userStatuses[currentIndex]
-    var progress by remember { mutableFloatStateOf(0f) }
+    var progress by remember { mutableStateOf(0f) }
     
     LaunchedEffect(currentIndex) {
         progress = 0f
@@ -644,9 +690,9 @@ fun StatusViewer(userStatuses: List<UserStatus>, myUsername: String, onClose: ()
                     Text(SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(currentStatus.timestamp)), color = Color.White.copy(0.7f), fontSize = 12.sp)
                 }
                 if (currentStatus.userId == myUsername) {
-                    IconButton(onClick = { onDelete(currentStatus.id) }) { Icon(Icons.Default.Delete, null, tint = Color.White) }
+                    IconButton(onClick = { onDelete(currentStatus.id) }) { Icon(Icons.Rounded.Delete, null, tint = Color.White) }
                 }
-                IconButton(onClick = onClose) { Icon(Icons.Default.Close, null, tint = Color.White) }
+                IconButton(onClick = onClose) { Icon(Icons.Rounded.Close, null, tint = Color.White) }
             }
         }
     }
@@ -663,9 +709,9 @@ fun ContactsScreen(contacts: List<UserProfile>, onContactClick: (UserProfile) ->
                     Box {
                         AsyncImage(model = contact.photoUrl, contentDescription = null, modifier = Modifier.size(50.dp).clip(CircleShape).background(LocalChatColors.current.separator), contentScale = ContentScale.Crop)
                         val presenceColor = when(contact.presenceStatus) {
-                            "Online" -> Color(0xFF31A24C)
-                            "Ocupado" -> Color(0xFFFA3E3E)
-                            "Ausente" -> Color(0xFFFFB02E)
+                            "Online" -> iOSGreen
+                            "Ocupado" -> iOSRed
+                            "Ausente" -> iOSOrange
                             else -> Color.Gray
                         }
                         if (contact.isOnline && contact.presenceStatus != "Invisível") Box(modifier = Modifier.align(Alignment.BottomEnd).size(14.dp).background(MaterialTheme.colorScheme.background, CircleShape).padding(2.dp).background(presenceColor, CircleShape))
@@ -725,7 +771,7 @@ fun MetaSearchBar(value: String, onValueChange: (String) -> Unit, isSearching: B
     Row(modifier = Modifier.fillMaxWidth().background(LocalChatColors.current.topBar).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(modifier = Modifier.weight(1f).height(40.dp).clip(RoundedCornerShape(20.dp)).background(LocalChatColors.current.tertiaryBackground).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Search, null, tint = MetaGray4, modifier = Modifier.size(20.dp))
+                Icon(Icons.Rounded.Search, null, tint = MetaGray4, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
                 Box(modifier = Modifier.weight(1f)) {
                     if (value.isEmpty()) Text("Pesquisar", color = MetaGray4, style = MaterialTheme.typography.bodyLarge)
@@ -738,7 +784,7 @@ fun MetaSearchBar(value: String, onValueChange: (String) -> Unit, isSearching: B
                         cursorBrush = SolidColor(MessengerBlue)
                     )
                 }
-                if (value.isNotEmpty()) { IconButton(onClick = { onValueChange("") }, modifier = Modifier.size(24.dp)) { Icon(Icons.Default.Close, null, tint = MetaGray4, modifier = Modifier.size(18.dp)) } }
+                if (value.isNotEmpty()) { IconButton(onClick = { onValueChange("") }, modifier = Modifier.size(24.dp)) { Icon(Icons.Rounded.Close, null, tint = MetaGray4, modifier = Modifier.size(18.dp)) } }
             }
         }
         AnimatedVisibility(visible = isSearching, enter = expandHorizontally() + fadeIn(), exit = shrinkHorizontally() + fadeOut()) { Text(text = "Cancelar", color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(start = 12.dp).clickable { onActiveChange(false); onValueChange("") }, style = MaterialTheme.typography.bodyLarge) }
@@ -759,7 +805,7 @@ fun MetaStatusRow(statuses: List<UserStatus>, myPhotoUrl: String?, myUsername: S
                 Box { 
                     AsyncImage(model = myPhotoUrl, contentDescription = null, modifier = Modifier.size(65.dp).clip(CircleShape).background(LocalChatColors.current.separator), contentScale = ContentScale.Crop)
                     if (myStatuses.isEmpty()) {
-                        Icon(Icons.Default.Add, null, modifier = Modifier.align(Alignment.BottomEnd).size(22.dp).background(Color.White, CircleShape).padding(2.dp).background(MessengerBlue, CircleShape).padding(2.dp), tint = Color.White) 
+                        Icon(Icons.Rounded.Add, null, modifier = Modifier.align(Alignment.BottomEnd).size(22.dp).background(Color.White, CircleShape).padding(2.dp).background(MessengerBlue, CircleShape).padding(2.dp), tint = Color.White) 
                     } else {
                         Box(modifier = Modifier.size(65.dp).drawBehind { drawCircle(brush = instaGradient, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx())) })
                     }
@@ -783,13 +829,13 @@ fun MetaStatusRow(statuses: List<UserStatus>, myPhotoUrl: String?, myUsername: S
 
 @Composable
 fun MetaChatItem(summary: ChatSummary, onClick: () -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier = Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         Box { 
             AsyncImage(model = summary.friendPhotoUrl, contentDescription = null, modifier = Modifier.size(60.dp).clip(CircleShape).background(LocalChatColors.current.separator), contentScale = ContentScale.Crop)
             val presenceColor = when(summary.presenceStatus) {
-                "Online" -> Color(0xFF31A24C)
-                "Ocupado" -> Color(0xFFFA3E3E)
-                "Ausente" -> Color(0xFFFFB02E)
+                "Online" -> iOSGreen
+                "Ocupado" -> iOSRed
+                "Ausente" -> iOSOrange
                 else -> Color.Gray
             }
             if (!summary.isGroup && summary.isOnline && summary.presenceStatus != "Invisível") Box(modifier = Modifier.align(Alignment.BottomEnd).size(16.dp).background(MaterialTheme.colorScheme.background, CircleShape).padding(2.dp).background(presenceColor, CircleShape)) 
@@ -821,9 +867,9 @@ fun MetaUserItem(user: UserProfile, isContact: Boolean, onChatClick: () -> Unit,
         }
         Row {
             if (!isContact) {
-                IconButton(onClick = onAddContactClick) { Icon(Icons.Default.PersonAdd, null, tint = MessengerBlue) }
+                IconButton(onClick = onAddContactClick) { Icon(Icons.Rounded.PersonAdd, null, tint = MessengerBlue) }
             }
-            IconButton(onClick = onChatClick) { Icon(Icons.AutoMirrored.Filled.Chat, null, tint = MessengerBlue) }
+            IconButton(onClick = onChatClick) { Icon(Icons.Rounded.ChatBubble, null, tint = MessengerBlue) }
         }
     }
 }
@@ -889,6 +935,11 @@ fun MetaMessageBubble(
                         }
                     }
                     if (message.imageUrl != null) AsyncImage(model = message.imageUrl, contentDescription = null, modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop)
+                    
+                    if (message.audioUrl != null) {
+                        AudioPlayerBubble(message.audioUrl!!, message.localAudioPath, isMe)
+                    }
+
                     Row(verticalAlignment = Alignment.Bottom) {
                         if (message.text.isNotEmpty()) {
                             Text(text = message.text, style = MaterialTheme.typography.bodyLarge.copy(color = textColor), modifier = Modifier.weight(1f, fill = false))
@@ -946,11 +997,61 @@ fun MetaMessageBubble(
     }
 }
 
+@Composable
+fun AudioPlayerBubble(url: String, localPath: String?, isMe: Boolean) {
+    var isPlaying by remember { mutableStateOf(false) }
+    val mediaPlayer = remember { MediaPlayer() }
+    val textColor = if (isMe) Color.White else MaterialTheme.colorScheme.onSurface
+    
+    DisposableEffect(url) {
+        onDispose {
+            mediaPlayer.release()
+        }
+    }
+    
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp).width(200.dp)) {
+        IconButton(onClick = {
+            if (isPlaying) {
+                mediaPlayer.pause()
+                isPlaying = false
+            } else {
+                try {
+                    mediaPlayer.reset()
+                    val source = localPath ?: url
+                    mediaPlayer.setDataSource(source)
+                    mediaPlayer.prepareAsync()
+                    mediaPlayer.setOnPreparedListener { 
+                        it.start()
+                        isPlaying = true 
+                    }
+                    mediaPlayer.setOnCompletionListener { isPlaying = false }
+                } catch (e: Exception) {
+                    Log.e("AudioPlayer", "Error: ${e.message}")
+                }
+            }
+        }, modifier = Modifier.size(32.dp)) {
+            Icon(if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, null, tint = textColor)
+        }
+        
+        Spacer(Modifier.width(8.dp))
+        
+        // Visualizador simples de áudio
+        Row(modifier = Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
+            repeat(15) {
+                Box(modifier = Modifier.width(2.dp).height((4..20).random().dp).background(textColor.copy(alpha = 0.5f), RoundedCornerShape(1.dp)))
+            }
+        }
+        
+        Spacer(Modifier.width(8.dp))
+        Icon(Icons.Rounded.Mic, null, tint = textColor.copy(alpha = 0.7f), modifier = Modifier.size(16.dp))
+    }
+}
+
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun MetaInput(
     text: String, 
-    onTextChange: (String) -> Unit, 
+    onValueChange: (String) -> Unit, 
     onAddClick: () -> Unit, 
     onSend: () -> Unit, 
     onAudioStart: () -> Unit, 
@@ -959,38 +1060,75 @@ fun MetaInput(
     recordingDuration: Long
 ) {
     var isRecording by remember { mutableStateOf(false) }
-    var dragX by remember { mutableFloatStateOf(0f) }
-    val isCancelled = dragX < -150f
+    var isLocked by remember { mutableStateOf(false) }
+    var dragX by remember { mutableStateOf(0f) }
+    var dragY by remember { mutableStateOf(0f) }
     
-    val scale by animateFloatAsState(if (isRecording) 1.2f else 1f, label = "")
-    val color by animateColorAsState(if (isCancelled) Color.Gray else if (isRecording) Color.Red else MessengerBlue, label = "")
+    val isCancelled = dragX < -150f
+    val isLockAction = dragY < -150f
+
+    val infiniteTransition = rememberInfiniteTransition(label = "audio_pulse")
+    val dotAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.4f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(600), RepeatMode.Reverse), label = "dot_alpha"
+    )
+
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 1f, targetValue = 1.25f,
+        animationSpec = infiniteRepeatable(tween(800), RepeatMode.Reverse), label = "pulse"
+    )
+
+    val color by animateColorAsState(
+        if (isCancelled) Color.Gray else if (isRecording) iOSRed else MessengerBlue,
+        label = "button_color"
+    )
+
+    val view = LocalView.current
 
     Surface(color = LocalChatColors.current.topBar, modifier = Modifier.fillMaxWidth().navigationBarsPadding().imePadding()) {
         Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp), verticalAlignment = Alignment.Bottom) {
-            if (!isRecording) {
-                IconButton(onClick = onAddClick) { 
-                    Icon(Icons.Default.AddCircle, null, tint = MessengerBlue, modifier = Modifier.size(26.dp))
+            
+            // Lado Esquerdo: Like/Add ou Delete quando travado
+            Box(modifier = Modifier.width(96.dp)) {
+                if (isLocked) {
+                    IconButton(onClick = { 
+                        onAudioStop(true)
+                        isRecording = false; isLocked = false; dragX = 0f; dragY = 0f
+                    }) { Icon(Icons.Rounded.Delete, null, tint = iOSRed) }
+                } else if (!isRecording) {
+                    Row {
+                        IconButton(onClick = onLikeClick) { Icon(Icons.Default.ThumbUp, null, tint = MessengerBlue) }
+                        IconButton(onClick = onAddClick) { Icon(Icons.Default.AddCircle, null, tint = MessengerBlue, modifier = Modifier.size(26.dp)) }
+                    }
                 }
             }
             
+            // Campo Central: Texto ou Timer de Gravação
             Box(modifier = Modifier.weight(1f).height(40.dp).clip(RoundedCornerShape(20.dp)).background(LocalChatColors.current.tertiaryBackground).padding(horizontal = 16.dp, vertical = 8.dp), contentAlignment = Alignment.CenterStart) {
                 if (isRecording) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(Color.Red).graphicsLayer {
-                            alpha = if (System.currentTimeMillis() % 1000 < 500) 1f else 0.2f
-                        })
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(iOSRed).alpha(dotAlpha))
                         Spacer(Modifier.width(8.dp))
                         val minutes = (recordingDuration / 60000)
                         val seconds = (recordingDuration % 60000) / 1000
-                        Text(text = String.format("%02d:%02d", minutes, seconds), color = MaterialTheme.colorScheme.onSurface)
+                        Text(text = String.format("%02d:%02d", minutes, seconds), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold)
+                        
                         Spacer(Modifier.weight(1f))
-                        Text(text = if (isCancelled) "Solte para cancelar" else "Deslize para cancelar <", color = MetaGray4, fontSize = 12.sp)
+                        
+                        if (!isLocked) {
+                            Text(
+                                text = if (isCancelled) "Solte para cancelar" else "< Deslize para cancelar", 
+                                color = MetaGray4, fontSize = 12.sp,
+                                modifier = Modifier.offset { IntOffset(dragX.roundToInt().coerceAtMost(0), 0) }
+                            )
+                        } else {
+                            Text("Gravando...", color = iOSRed, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+                        }
                     }
                 } else {
                     if (text.isEmpty()) Text("Mensagem...", color = MetaGray4, style = MaterialTheme.typography.bodyLarge)
                     BasicTextField(
-                        value = text, 
-                        onValueChange = onTextChange,
+                        value = text, onValueChange = onValueChange,
                         modifier = Modifier.fillMaxWidth(), 
                         textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface), 
                         cursorBrush = SolidColor(MessengerBlue)
@@ -998,43 +1136,54 @@ fun MetaInput(
                 }
             }
             
-            if (text.isNotEmpty() && !isRecording) {
-                IconButton(onClick = onSend) {
-                    Icon(Icons.AutoMirrored.Filled.Send, null, tint = MessengerBlue) 
-                }
-            } else {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+            // Botão Direito: Enviar ou Mic
+            Box(modifier = Modifier.width(48.dp), contentAlignment = Alignment.Center) {
+                if (text.isNotEmpty() && !isRecording) {
+                    IconButton(onClick = onSend) { Icon(Icons.AutoMirrored.Filled.Send, null, tint = MessengerBlue) }
+                } else if (isLocked) {
+                    IconButton(onClick = {
+                        onAudioStop(false)
+                        isRecording = false; isLocked = false; dragX = 0f; dragY = 0f
+                    }) {
+                        Box(modifier = Modifier.size(40.dp).background(MessengerBlue, CircleShape), contentAlignment = Alignment.Center) {
+                            Icon(Icons.AutoMirrored.Filled.Send, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                } else {
                     Box(modifier = Modifier
-                        .scale(scale)
+                        .offset { IntOffset(0, dragY.roundToInt().coerceAtMost(0)) }
+                        .scale(if (isRecording) pulseScale else 1f)
                         .pointerInput(Unit) {
-                            detectDragGestures(
+                            detectDragGesturesAfterLongPress(
                                 onDragStart = { 
-                                    isRecording = true
-                                    dragX = 0f
-                                    onAudioStart()
+                                    isRecording = true; dragX = 0f; dragY = 0f; onAudioStart()
+                                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                                 },
                                 onDragEnd = {
-                                    onAudioStop(isCancelled)
-                                    isRecording = false
-                                    dragX = 0f
+                                    if (!isLocked) {
+                                        onAudioStop(isCancelled); isRecording = false
+                                    }
+                                    dragX = 0f; dragY = 0f
                                 },
-                                onDragCancel = {
-                                    onAudioStop(true)
-                                    isRecording = false
-                                },
+                                onDragCancel = { if (!isLocked) { onAudioStop(true); isRecording = false } },
                                 onDrag = { _, dragAmount ->
-                                    dragX += dragAmount.x
+                                    if (!isLocked) {
+                                        dragX += dragAmount.x; dragY += dragAmount.y
+                                        if (isLockAction) {
+                                            isLocked = true; dragY = 0f; dragX = 0f
+                                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                        }
+                                    }
                                 }
                             )
                         }
                     ) {
-                        IconButton(onClick = {}) {
-                            Icon(Icons.Default.Mic, null, tint = color, modifier = Modifier.size(26.dp))
-                        }
-                    }
-                    if (!isRecording) {
-                        IconButton(onClick = onLikeClick) {
-                            Icon(Icons.Default.ThumbUp, null, tint = MessengerBlue)
+                        IconButton(onClick = {}) { Icon(Icons.Rounded.Mic, null, tint = color, modifier = Modifier.size(26.dp)) }
+                        if (isRecording && !isLocked) {
+                            Icon(
+                                Icons.Rounded.Lock, null, tint = MetaGray4, 
+                                modifier = Modifier.align(Alignment.TopCenter).offset(y = (-40).dp).size(16.dp).alpha(((-dragY)/150f).coerceIn(0f, 1f))
+                            )
                         }
                     }
                 }
