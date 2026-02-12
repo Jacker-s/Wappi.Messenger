@@ -1000,12 +1000,30 @@ fun MetaMessageBubble(
 @Composable
 fun AudioPlayerBubble(url: String, localPath: String?, isMe: Boolean) {
     var isPlaying by remember { mutableStateOf(false) }
+    var progress by remember { mutableFloatStateOf(0f) }
     val mediaPlayer = remember { MediaPlayer() }
     val textColor = if (isMe) Color.White else MaterialTheme.colorScheme.onSurface
     
+    LaunchedEffect(isPlaying) {
+        if (isPlaying) {
+            while (isPlaying) {
+                try {
+                    if (mediaPlayer.duration > 0) {
+                        progress = mediaPlayer.currentPosition.toFloat() / mediaPlayer.duration
+                    }
+                } catch (e: Exception) {}
+                delay(100)
+                if (!mediaPlayer.isPlaying) isPlaying = false
+            }
+        }
+    }
+
     DisposableEffect(url) {
         onDispose {
-            mediaPlayer.release()
+            try {
+                mediaPlayer.stop()
+                mediaPlayer.release()
+            } catch (e: Exception) {}
         }
     }
     
@@ -1016,34 +1034,84 @@ fun AudioPlayerBubble(url: String, localPath: String?, isMe: Boolean) {
                 isPlaying = false
             } else {
                 try {
-                    mediaPlayer.reset()
-                    val source = localPath ?: url
-                    mediaPlayer.setDataSource(source)
-                    mediaPlayer.prepareAsync()
-                    mediaPlayer.setOnPreparedListener { 
-                        it.start()
-                        isPlaying = true 
+                    if (progress > 0f && progress < 0.99f) {
+                        mediaPlayer.start()
+                        isPlaying = true
+                    } else {
+                        mediaPlayer.reset()
+                        val source = localPath ?: url
+                        mediaPlayer.setDataSource(source)
+                        mediaPlayer.prepareAsync()
+                        mediaPlayer.setOnPreparedListener { 
+                            it.start()
+                            isPlaying = true 
+                        }
                     }
-                    mediaPlayer.setOnCompletionListener { isPlaying = false }
+                    mediaPlayer.setOnCompletionListener { 
+                        isPlaying = false
+                        progress = 0f
+                    }
                 } catch (e: Exception) {
                     Log.e("AudioPlayer", "Error: ${e.message}")
                 }
             }
-        }, modifier = Modifier.size(32.dp)) {
-            Icon(if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, null, tint = textColor)
+        }, modifier = Modifier.size(36.dp)) {
+            Icon(
+                imageVector = if (isPlaying) Icons.Rounded.PauseCircleFilled else Icons.Rounded.PlayCircleFilled, 
+                contentDescription = null, 
+                tint = textColor, 
+                modifier = Modifier.size(32.dp)
+            )
         }
         
         Spacer(Modifier.width(8.dp))
         
-        // Visualizador simples de áudio
-        Row(modifier = Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
-            repeat(15) {
-                Box(modifier = Modifier.width(2.dp).height((4..20).random().dp).background(textColor.copy(alpha = 0.5f), RoundedCornerShape(1.dp)))
-            }
+        Column(modifier = Modifier.weight(1f)) {
+            AudioVisualizer(isPlaying = isPlaying, color = textColor)
+            Spacer(Modifier.height(4.dp))
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.fillMaxWidth().height(2.dp).clip(CircleShape),
+                color = textColor,
+                trackColor = textColor.copy(alpha = 0.2f)
+            )
         }
         
         Spacer(Modifier.width(8.dp))
         Icon(Icons.Rounded.Mic, null, tint = textColor.copy(alpha = 0.7f), modifier = Modifier.size(16.dp))
+    }
+}
+
+@Composable
+fun AudioVisualizer(isPlaying: Boolean, color: Color) {
+    val infiniteTransition = rememberInfiniteTransition(label = "visualizer")
+    val heights = remember { List(15) { (4..12).random() } }
+    
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        heights.forEachIndexed { index, baseHeight ->
+            val duration = remember { (400..800).random() }
+            val animatedHeight by if (isPlaying) {
+                infiniteTransition.animateFloat(
+                    initialValue = 0.5f,
+                    targetValue = 1f,
+                    animationSpec = infiniteRepeatable(tween(duration), RepeatMode.Reverse),
+                    label = "bar_$index"
+                )
+            } else {
+                remember { mutableStateOf(1f) }
+            }
+
+            Box(
+                modifier = Modifier
+                    .width(2.dp)
+                    .height((baseHeight.dp * (if (isPlaying) animatedHeight * 2f else 1f)).coerceAtMost(22.dp))
+                    .background(color.copy(alpha = if (isPlaying) 0.8f else 0.4f), RoundedCornerShape(1.dp))
+            )
+        }
     }
 }
 
