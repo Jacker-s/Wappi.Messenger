@@ -33,7 +33,8 @@ data class UserStatus(
     var imageUrl: String = "",
     var timestamp: Long = 0L,
     var userPhotoUrl: String? = null,
-    var id: String = ""
+    var id: String = "",
+    var viewers: Map<String, Long> = emptyMap() // userId -> timestamp
 )
 
 @IgnoreExtraProperties

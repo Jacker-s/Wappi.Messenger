@@ -88,10 +88,14 @@ class ChatViewModel : ViewModel() {
     private val _blockedUsers = MutableStateFlow<List<String>>(emptyList())
     val blockedUsers: StateFlow<List<String>> = _blockedUsers
 
+    private val _blockedProfiles = MutableStateFlow<List<UserProfile>>(emptyList())
+    val blockedProfiles: StateFlow<List<UserProfile>> = _blockedProfiles
+
     private var chatsListener: ValueEventListener? = null
     private var contactsListener: ValueEventListener? = null
     private var messagesListener: ValueEventListener? = null
     private var targetProfileListener: ValueEventListener? = null
+    private var statusesListener: ValueEventListener? = null
     private var typingListener: ValueEventListener? = null
     private var pinnedMessageListener: ValueEventListener? = null
     private var blockedListener: ValueEventListener? = null
@@ -104,7 +108,6 @@ class ChatViewModel : ViewModel() {
     private var recordingStartTime: Long = 0
     private var searchJob: Job? = null
 
-    // Timer de Áudio
     private val _recordingDuration = MutableStateFlow(0L)
     val recordingDuration: StateFlow<Long> = _recordingDuration
     private var timerHandler = Handler(Looper.getMainLooper())
@@ -121,11 +124,11 @@ class ChatViewModel : ViewModel() {
             _myUsername.value = username
             if (username.isNotEmpty()) {
                 loadMyProfile(username)
+                listenToBlockedUsers(username)
                 listenToChats(username)
                 listenToContacts(username)
                 listenToStatuses(username) 
                 setupPresence(username)
-                listenToBlockedUsers(username)
             }
         }.addOnFailureListener { Log.e("ChatViewModel", "Erro setupUserSession: ${it.message}") }
     }
@@ -160,6 +163,12 @@ class ChatViewModel : ViewModel() {
                 updatePresence(FriendApplication.isAppInForeground)
             }
         }
+
+        viewModelScope.launch {
+            FriendApplication.instance.isForeground.collect { isForeground ->
+                updatePresence(isForeground)
+            }
+        }
     }
 
     fun logout() {
@@ -180,6 +189,7 @@ class ChatViewModel : ViewModel() {
             chatsListener?.let { db.child("chats").child(me).removeEventListener(it) }
             contactsListener?.let { db.child("contacts").child(me).removeEventListener(it) }
             blockedListener?.let { db.child("blocks").child(me).removeEventListener(it) }
+            statusesListener?.let { db.child("status").removeEventListener(it) }
         }
         currentChatPath?.let { path ->
             messagesListener?.let { l -> db.child(path).removeEventListener(l) }
@@ -306,9 +316,7 @@ class ChatViewModel : ViewModel() {
             expiryTime = if (tempDurationHours > 0) System.currentTimeMillis() + (tempDurationHours * 3600000) else null
         )
 
-        val path = if (isGroup) "group_messages/$target" else "messages/${chatPathFor(me, target)}"
-        db.child(path).child(msgId).setValue(msg)
-        updateChatSummary(msg)
+        sendMessageObject(msg)
         setTyping(false)
     }
 
@@ -475,40 +483,62 @@ class ChatViewModel : ViewModel() {
     }
 
     private fun sendMessageObject(msg: Message) {
-        val path = if (msg.isGroup) "group_messages/${msg.receiverId}" else "messages/${chatPathFor(msg.senderId, msg.receiverId)}"
-        db.child(path).child(msg.id).setValue(msg)
-        updateChatSummary(msg)
+        if (msg.isGroup) {
+            val path = "group_messages/${msg.receiverId}"
+            db.child(path).child(msg.id).setValue(msg)
+            updateChatSummary(msg)
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                // Se eu bloqueei o alvo, não envio
+                if (_blockedUsers.value.contains(msg.receiverId)) return@launch
+                
+                // IMPORTANTE: Não tentamos ler a lista de bloqueios do alvo diretamente, 
+                // pois isso causa erro de permissão. Simplesmente tentamos escrever a mensagem.
+                val path = "messages/${chatPathFor(msg.senderId, msg.receiverId)}"
+                db.child(path).child(msg.id).setValue(msg)
+                updateChatSummary(msg)
+            } catch (e: Exception) {
+                Log.e("ChatViewModel", "Erro ao enviar mensagem: ${e.message}")
+            }
+        }
     }
 
     private fun updateChatSummary(msg: Message) {
         viewModelScope.launch {
-            val me = msg.senderId
-            val friend = msg.receiverId
-            val isGroup = msg.isGroup
-            
-            if (isGroup) {
-                val groupSnapshot = db.child("groups").child(friend).get().await()
-                val group = groupSnapshot.getValue(Group::class.java) ?: return@launch
-                val summary = ChatSummary(
-                    friendId = friend, 
-                    lastMessage = if (msg.audioUrl != null) "Áudio" else if (msg.imageUrl != null) "Imagem" else "${msg.senderName}: ${msg.text}", 
-                    timestamp = msg.timestamp, 
-                    lastSenderId = me, 
-                    friendName = group.name, 
-                    friendPhotoUrl = group.photoUrl, 
-                    isGroup = true, 
-                    hasUnread = false
-                )
-                group.members.keys.forEach { memberUsername ->
-                    db.child("chats").child(memberUsername).child(friend).setValue(summary.copy(hasUnread = memberUsername != me))
-                }
-            } else {
-                val friendProf = db.child("users").child(friend).get().await().getValue(UserProfile::class.java)
-                val summary = ChatSummary(friendId = friend, lastMessage = if (msg.audioUrl != null) "Áudio" else if (msg.imageUrl != null) "Imagem" else msg.text, timestamp = msg.timestamp, lastSenderId = me, friendName = friendProf?.name ?: friend, friendPhotoUrl = friendProf?.photoUrl, isGroup = false, isOnline = friendProf?.isOnline ?: false, hasUnread = false, presenceStatus = friendProf?.presenceStatus ?: "Online")
-                db.child("chats").child(me).child(friend).setValue(summary)
+            try {
+                val me = msg.senderId
+                val friend = msg.receiverId
+                val isGroup = msg.isGroup
                 
-                val meProf = db.child("users").child(me).get().await().getValue(UserProfile::class.java)
-                db.child("chats").child(friend).child(me).setValue(summary.copy(friendId = me, friendName = meProf?.name ?: me, friendPhotoUrl = meProf?.photoUrl, hasUnread = true, presenceStatus = meProf?.presenceStatus ?: "Online"))
+                if (isGroup) {
+                    val groupSnapshot = db.child("groups").child(friend).get().await()
+                    val group = groupSnapshot.getValue(Group::class.java) ?: return@launch
+                    val summary = ChatSummary(
+                        friendId = friend, 
+                        lastMessage = if (msg.audioUrl != null) "Áudio" else if (msg.imageUrl != null) "Imagem" else "${msg.senderName}: ${msg.text}", 
+                        timestamp = msg.timestamp, 
+                        lastSenderId = me, 
+                        friendName = group.name, 
+                        friendPhotoUrl = group.photoUrl, 
+                        isGroup = true, 
+                        hasUnread = false
+                    )
+                    group.members.keys.forEach { memberUsername ->
+                        db.child("chats").child(memberUsername).child(friend).setValue(summary.copy(hasUnread = memberUsername != me))
+                    }
+                } else {
+                    val friendProf = db.child("users").child(friend).get().await().getValue(UserProfile::class.java)
+                    val summary = ChatSummary(friendId = friend, lastMessage = if (msg.audioUrl != null) "Áudio" else if (msg.imageUrl != null) "Imagem" else msg.text, timestamp = msg.timestamp, lastSenderId = me, friendName = friendProf?.name ?: friend, friendPhotoUrl = friendProf?.photoUrl, isGroup = false, isOnline = friendProf?.isOnline ?: false, hasUnread = false, presenceStatus = friendProf?.presenceStatus ?: "Online")
+                    db.child("chats").child(me).child(friend).setValue(summary)
+                    
+                    val meProf = db.child("users").child(me).get().await().getValue(UserProfile::class.java)
+                    db.child("chats").child(friend).child(me).setValue(summary.copy(friendId = me, friendName = meProf?.name ?: me, friendPhotoUrl = meProf?.photoUrl, hasUnread = true, presenceStatus = meProf?.presenceStatus ?: "Online"))
+                }
+            } catch (e: Exception) {
+                Log.e("ChatViewModel", "Erro ao atualizar resumo: ${e.message}")
             }
         }
     }
@@ -597,7 +627,10 @@ class ChatViewModel : ViewModel() {
         chatsListener?.let { db.child("chats").child(username).removeEventListener(it) }
         chatsListener = object : ValueEventListener {
             override fun onDataChange(s: DataSnapshot) {
-                val chats = s.children.mapNotNull { it.getValue(ChatSummary::class.java) }.sortedByDescending { it.timestamp }
+                val blocked = _blockedUsers.value
+                val chats = s.children.mapNotNull { it.getValue(ChatSummary::class.java) }
+                    .filter { it.friendId.isNotBlank() && !blocked.contains(it.friendId) } 
+                    .sortedByDescending { it.timestamp }
                 _activeChats.value = chats
                 chats.forEach { chat -> 
                     if (!chat.isGroup) syncFriendPresence(chat.friendId) 
@@ -614,12 +647,15 @@ class ChatViewModel : ViewModel() {
         contactsListener = object : ValueEventListener {
             override fun onDataChange(s: DataSnapshot) {
                 val contactIds = s.children.mapNotNull { it.key }
+                val blocked = _blockedUsers.value.toSet()
                 viewModelScope.launch {
-                    val contactProfiles = contactIds.mapNotNull { id ->
-                        db.child("users").child(id).get().await().getValue(UserProfile::class.java)
-                    }
-                    _contacts.value = contactProfiles
-                    contactProfiles.forEach { syncFriendPresence(it.id) }
+                    try {
+                        val contactProfiles = contactIds.filter { it.isNotBlank() && !blocked.contains(it) }.mapNotNull { id ->
+                            db.child("users").child(id).get().await().getValue(UserProfile::class.java)
+                        }
+                        _contacts.value = contactProfiles
+                        contactProfiles.forEach { syncFriendPresence(it.id) }
+                    } catch (e: Exception) {}
                 }
             }
             override fun onCancelled(e: DatabaseError) {}
@@ -671,8 +707,12 @@ class ChatViewModel : ViewModel() {
         messagesListener = object : ValueEventListener {
             override fun onDataChange(s: DataSnapshot) { 
                 val now = System.currentTimeMillis()
+                val blocked = _blockedUsers.value
                 val msgs = s.children.mapNotNull { it.getValue(Message::class.java) }
-                val filtered = msgs.filter { it.expiryTime == null || it.expiryTime!! > now } 
+                val filtered = msgs.filter { 
+                    (it.expiryTime == null || it.expiryTime!! > now) && 
+                    !blocked.contains(it.senderId) // Filtrar mensagens de quem eu bloqueei
+                } 
                 
                 filtered.forEach { msg ->
                     if (msg.audioUrl != null) downloadAudioIfNeeded(msg)
@@ -769,11 +809,13 @@ class ChatViewModel : ViewModel() {
                             isOnline = true
                         )
                         viewModelScope.launch {
-                            db.child("uid_to_username").child(uid).setValue(emailBase).await()
-                            db.child("users").child(emailBase).setValue(profile).await()
-                            _isUserLoggedIn.value = true
-                            setupUserSession()
-                            callback(true, null)
+                            try {
+                                db.child("uid_to_username").child(uid).setValue(emailBase).await()
+                                db.child("users").child(emailBase).setValue(profile).await()
+                                _isUserLoggedIn.value = true
+                                setupUserSession()
+                                callback(true, null)
+                            } catch (e: Exception) {}
                         }
                     }
                 }
@@ -839,11 +881,20 @@ class ChatViewModel : ViewModel() {
         db.child("status").child(statusId).removeValue()
     }
 
+    fun markStatusAsViewed(statusId: String) {
+        val me = _myUsername.value
+        if (me.isEmpty()) return
+        db.child("status").child(statusId).child("viewers").child(me).setValue(System.currentTimeMillis())
+    }
+
     private fun listenToStatuses(myUsername: String) {
-        db.child("status").limitToLast(50).addValueEventListener(object : ValueEventListener {
+        statusesListener?.let { db.child("status").removeEventListener(it) }
+        statusesListener = object : ValueEventListener {
             override fun onDataChange(s: DataSnapshot) {
                 val now = System.currentTimeMillis()
-                val list = s.children.mapNotNull { it.getValue(UserStatus::class.java) }.filter { now - it.timestamp < 86400000 }
+                val blocked = _blockedUsers.value.toSet()
+                val list = s.children.mapNotNull { it.getValue(UserStatus::class.java) }
+                    .filter { now - it.timestamp < 86400000 && !blocked.contains(it.userId) }
                 
                 db.child("contacts").child(myUsername).get().addOnSuccessListener { contactSnapshot ->
                     val contactIds = contactSnapshot.children.mapNotNull { it.key }.toSet()
@@ -852,7 +903,8 @@ class ChatViewModel : ViewModel() {
                 }
             }
             override fun onCancelled(e: DatabaseError) {}
-        })
+        }
+        db.child("status").limitToLast(50).addValueEventListener(statusesListener!!)
     }
 
     fun searchUsers(query: String) {
@@ -865,9 +917,10 @@ class ChatViewModel : ViewModel() {
         searchJob = viewModelScope.launch {
             delay(300) 
             try {
+                val blocked = _blockedUsers.value.toSet()
                 val snapshot = db.child("users").get().await()
                 val users = snapshot.children.mapNotNull { it.getValue(UserProfile::class.java) }
-                    .filter { it.id != _myUsername.value }
+                    .filter { it.id != _myUsername.value && !blocked.contains(it.id) }
                     .filter { 
                         it.name.contains(query, ignoreCase = true) || 
                         it.id.contains(query, ignoreCase = true) 
@@ -882,12 +935,11 @@ class ChatViewModel : ViewModel() {
 
     fun deleteChat(friendId: String) {
         val me = _myUsername.value
-        if (me.isEmpty()) return
+        if (me.isEmpty() || friendId.isBlank()) return // Proteção crítica
         
         db.child("chats").child(me).child(friendId).get().addOnSuccessListener { snapshot ->
             val summary = snapshot.getValue(ChatSummary::class.java)
             if (summary?.isGroup == true) {
-                // Se for grupo, apenas limpa o resumo para o usuário, não remove da lista permanentemente
                 val summaryUpdate = mapOf("lastMessage" to "Conversa excluída", "hasUnread" to false)
                 db.child("chats").child(me).child(friendId).updateChildren(summaryUpdate)
             } else {
@@ -898,11 +950,9 @@ class ChatViewModel : ViewModel() {
 
     fun clearChat(friendId: String, isGroup: Boolean) {
         val me = _myUsername.value
-        if (me.isEmpty()) return
+        if (me.isEmpty() || friendId.isBlank()) return
         
         if (isGroup) {
-            // Para grupos, apenas atualizamos o resumo pessoal do usuário.
-            // NÃO removemos as mensagens globais (path) para não apagar para os outros.
             val summaryUpdate = mapOf("lastMessage" to "Conversa limpa", "timestamp" to System.currentTimeMillis(), "hasUnread" to false)
             db.child("chats").child(me).child(friendId).updateChildren(summaryUpdate)
         } else {
@@ -930,7 +980,17 @@ class ChatViewModel : ViewModel() {
     private fun listenToBlockedUsers(username: String) {
         blockedListener = object : ValueEventListener {
             override fun onDataChange(s: DataSnapshot) {
-                _blockedUsers.value = s.children.mapNotNull { it.key }
+                val ids = s.children.mapNotNull { it.key }
+                _blockedUsers.value = ids
+                
+                viewModelScope.launch {
+                    try {
+                        val profiles = ids.mapNotNull { id ->
+                            db.child("users").child(id).get().await().getValue(UserProfile::class.java)
+                        }
+                        _blockedProfiles.value = profiles
+                    } catch (e: Exception) {}
+                }
             }
             override fun onCancelled(error: DatabaseError) {}
         }
@@ -968,39 +1028,47 @@ class ChatViewModel : ViewModel() {
         val me = _myUsername.value
         val target = _targetId.value
         if (me.isEmpty() || target.isEmpty()) return
-        if (!isGroup && _blockedUsers.value.contains(target)) return
-
-        val roomId = customRoomId
         
-        val callData = mapOf(
-            "callerId" to me,
-            "receiverId" to target,
-            "status" to "RINGING",
-            "isVideo" to isVideo,
-            "timestamp" to ServerValue.TIMESTAMP
-        )
+        viewModelScope.launch {
+            try {
+                if (!isGroup) {
+                    if (_blockedUsers.value.contains(target)) return@launch
+                }
 
-        db.child("calls").child(roomId).setValue(callData)
+                val roomId = customRoomId
+                val callData = mapOf(
+                    "callerId" to me,
+                    "receiverId" to target,
+                    "status" to "RINGING",
+                    "isVideo" to isVideo,
+                    "timestamp" to ServerValue.TIMESTAMP
+                )
 
-        val msgId = db.push().key ?: return
-        val msg = Message(
-            id = msgId,
-            senderId = me,
-            receiverId = target,
-            text = if (isVideo) "Chamada de vídeo" else "Chamada de áudio",
-            timestamp = System.currentTimeMillis(),
-            isGroup = isGroup,
-            senderName = _myName.value,
-            senderPhotoUrl = _myPhotoUrl.value,
-            callRoomId = roomId,
-            callType = if (isVideo) "VIDEO" else "AUDIO",
-            callStatus = "STARTING",
-            isCall = true
-        )
-        
-        db.child("call_notifications").child(target).setValue(msg)
-        
-        val path = if (isGroup) "group_messages/$target" else "messages/${chatPathFor(me, target)}"
-        db.child(path).child(msgId).setValue(msg)
+                db.child("calls").child(roomId).setValue(callData)
+
+                val msgId = db.push().key ?: return@launch
+                val msg = Message(
+                    id = msgId,
+                    senderId = me,
+                    receiverId = target,
+                    text = if (isVideo) "Chamada de vídeo" else "Chamada de áudio",
+                    timestamp = System.currentTimeMillis(),
+                    isGroup = isGroup,
+                    senderName = _myName.value,
+                    senderPhotoUrl = _myPhotoUrl.value,
+                    callRoomId = roomId,
+                    callType = if (isVideo) "VIDEO" else "AUDIO",
+                    callStatus = "STARTING",
+                    isCall = true
+                )
+                
+                db.child("call_notifications").child(target).setValue(msg)
+                
+                val path = if (isGroup) "group_messages/$target" else "messages/${chatPathFor(me, target)}"
+                db.child(path).child(msgId).setValue(msg)
+            } catch (e: Exception) {
+                Log.e("ChatViewModel", "Erro ao iniciar chamada: ${e.message}")
+            }
+        }
     }
 }

@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -77,8 +76,15 @@ class CallActivity : ComponentActivity() {
         targetPhotoUrl = intent.getStringExtra("targetPhotoUrl")
         isOutgoing = intent.getBooleanExtra("isOutgoing", false)
         isVideo = intent.getBooleanExtra("isVideo", false)
+        val isAcceptedFromNotification = intent.getBooleanExtra("isAcceptedFromNotification", false)
 
         if (roomId.isEmpty()) { finish(); return }
+
+        // If accepted from notification, ensure status is CONNECTED in database immediately
+        if (isAcceptedFromNotification) {
+            database.child("calls").child(roomId).child("status").setValue("CONNECTED")
+            callStatusState.value = "CONNECTED"
+        }
 
         if (isVideo) {
             localVideoView = SurfaceViewRenderer(this).apply {
@@ -179,9 +185,10 @@ class CallActivity : ComponentActivity() {
             override fun onDataChange(snapshot: DataSnapshot) {
                 if (isEnding) return
                 val status = snapshot.child("status").getValue(String::class.java) ?: "RINGING"
-                if (status != "MUTED" && status != "CONNECTED") {
-                    callStatusState.value = status
-                }
+                
+                // Important: Always update local state to match database
+                callStatusState.value = status
+                
                 if (status == "ENDED" || status == "REJECTED") {
                     cleanupAndFinish()
                 }
@@ -314,7 +321,7 @@ fun MetaCallScreen(
                     isSpeakerOn = !isSpeakerOn
                     onSpeakerToggle(isSpeakerOn)
                 }, modifier = Modifier.size(50.dp).clip(CircleShape).background(if (isSpeakerOn) Color.White else Color.Transparent)) {
-                    Icon(if (isSpeakerOn) Icons.AutoMirrored.Filled.VolumeUp else Icons.AutoMirrored.Filled.VolumeOff, null, tint = if (isSpeakerOn) Color.Black else Color.White, modifier = Modifier.size(24.dp))
+                    Icon(if (isSpeakerOn) Icons.Default.VolumeUp else Icons.Default.VolumeOff, null, tint = if (isSpeakerOn) Color.Black else Color.White, modifier = Modifier.size(24.dp))
                 }
 
                 if (isVideo) {

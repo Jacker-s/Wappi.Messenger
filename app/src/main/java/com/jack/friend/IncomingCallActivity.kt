@@ -188,19 +188,19 @@ fun IncomingCallScreen(callerName: String, callerPhotoUrl: String?, onAccept: ()
                 Spacer(Modifier.height(24.dp))
                 Text(callerName, color = Color.White, style = MaterialTheme.typography.displayLarge, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(8.dp))
-                Text("Friend Audio...", color = Color.White.copy(alpha = 0.6f), style = MaterialTheme.typography.bodyLarge)
+                Text(" Audio...", color = Color.White.copy(alpha = 0.6f), style = MaterialTheme.typography.bodyLarge)
             }
             
             Row(modifier = Modifier.fillMaxWidth().padding(bottom = 100.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     FloatingActionButton(onClick = onReject, containerColor = iOSRed, contentColor = Color.White, shape = CircleShape, modifier = Modifier.size(75.dp)) { Icon(Icons.Rounded.CallEnd, null, modifier = Modifier.size(35.dp)) }
                     Spacer(Modifier.height(12.dp))
-                    Text("Decline", color = Color.White, style = MaterialTheme.typography.labelSmall)
+                    Text("Recusar", color = Color.White, style = MaterialTheme.typography.labelSmall)
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     FloatingActionButton(onClick = onAccept, containerColor = iOSGreen, contentColor = Color.White, shape = CircleShape, modifier = Modifier.size(75.dp)) { Icon(Icons.Rounded.Call, null, modifier = Modifier.size(35.dp)) }
                     Spacer(Modifier.height(12.dp))
-                    Text("Accept", color = Color.White, style = MaterialTheme.typography.labelSmall)
+                    Text("Atender", color = Color.White, style = MaterialTheme.typography.labelSmall)
                 }
             }
         }

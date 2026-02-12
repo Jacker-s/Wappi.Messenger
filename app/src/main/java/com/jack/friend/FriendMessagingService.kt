@@ -20,7 +20,7 @@ class FriendMessagingService : FirebaseMessagingService() {
 
     companion object {
         private const val CHANNEL_ID = "MESSAGES_CHANNEL_V7"
-        private const val CALL_CHANNEL_ID = "CALL_CHANNEL_V7"
+        private const val CALL_CHANNEL_ID = "CALL_CHANNEL_V8" // Incremented to refresh channel settings
         private const val TAG = "FriendMessagingService"
         private const val GROUP_KEY = "com.jack.friend.MESSAGES_GROUP"
     }
@@ -73,6 +73,7 @@ class FriendMessagingService : FirebaseMessagingService() {
             .setFullScreenIntent(fullScreenPendingIntent, true)
             .setOngoing(true)
             .setAutoCancel(false)
+            .setSound(null) // Silent notification, Activity plays the ringtone
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
 
         val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
@@ -154,11 +155,7 @@ class FriendMessagingService : FirebaseMessagingService() {
             if (notificationManager.getNotificationChannel(CALL_CHANNEL_ID) == null) {
                  val callChannel = NotificationChannel(CALL_CHANNEL_ID, "Chamadas", NotificationManager.IMPORTANCE_HIGH).apply {
                     description = "Notificações de chamadas recebidas"
-                    val audioAttributes = AudioAttributes.Builder()
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
-                        .build()
-                    setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE), audioAttributes)
+                    setSound(null, null) // Silent channel to avoid double ringtone
                     enableVibration(true)
                     lockscreenVisibility = Notification.VISIBILITY_PUBLIC
                 }

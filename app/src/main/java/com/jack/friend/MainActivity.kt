@@ -242,7 +242,7 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
     val recordingDuration by viewModel.recordingDuration.collectAsStateWithLifecycle()
     val pinnedMessage by viewModel.pinnedMessage.collectAsStateWithLifecycle()
 
-    val context = LocalContext.current; val listState = rememberLazyListState()
+    val context = LocalContext.current; val listState = rememberLazyListState(); val view = LocalView.current
     var textState by remember { mutableStateOf("") }; var searchInput by remember { mutableStateOf("") }; var isSearching by remember { mutableStateOf(false) }
     var fullScreenImageUrl by remember { mutableStateOf<String?>(null) }
     var showAttachmentMenu by remember { mutableStateOf(false) }
@@ -259,6 +259,8 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
     
     var viewingStatuses by remember { mutableStateOf<List<UserStatus>?>(null) }
     var selectedFilter by remember { mutableStateOf("Tudo") }
+    
+    var selectedChatForOptions by remember { mutableStateOf<ChatSummary?>(null) }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -507,7 +509,7 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                                 myPhotoUrl = myPhotoUrl, 
                                 myUsername = myUsername,
                                 onAdd = { statusLauncher.launch("image/*") }, 
-                                onViewUserStatuses = { viewingStatuses = it }
+                                onViewUserStatuses = { viewModel.markStatusAsViewed(it.first().id); viewingStatuses = it }
                             ) 
                         }
                         val filteredChats = when(selectedFilter) {
@@ -522,7 +524,14 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                             }
                             else if (!isSearching || searchInput.isEmpty()) itemsIndexed(filteredChats, key = { _, s -> s.friendId }) { index, summary -> 
                                 Column {
-                                    MetaChatItem(summary, onClick = { viewModel.setTargetId(summary.friendId, summary.isGroup) })
+                                    MetaChatItem(
+                                        summary, 
+                                        onClick = { viewModel.setTargetId(summary.friendId, summary.isGroup) },
+                                        onLongClick = { 
+                                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                            selectedChatForOptions = summary 
+                                        }
+                                    )
                                     if (index < filteredChats.size - 1) {
                                         HorizontalDivider(modifier = Modifier.padding(start = 88.dp), thickness = 0.5.dp, color = LocalChatColors.current.separator)
                                     }
@@ -571,6 +580,29 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
             if (showDeleteGroupDialog) { AlertDialog(onDismissRequest = { showDeleteGroupDialog = false }, title = { Text("Apagar Grupo") }, text = { Text("Isso excluirá o grupo e todas as mensagens para todos os membros.") }, confirmButton = { TextButton(onClick = { viewModel.deleteGroup(targetId) { success, error -> if (success) { showDeleteGroupDialog = false; viewModel.setTargetId("") } else { Toast.makeText(context, error ?: "Erro", Toast.LENGTH_SHORT).show() } };  }) { Text("Apagar", color = iOSRed) } }, dismissButton = { TextButton(onClick = { showDeleteGroupDialog = false }) { Text("Cancelar") } }) }
             if (showAddContactDialog) { AddContactDialog(onDismiss = { showAddContactDialog = false }, onAdd = { username -> viewModel.addContact(username) { success, error -> if (success) showAddContactDialog = false else Toast.makeText(context, error ?: "Erro ao adicionar", Toast.LENGTH_SHORT).show() } }) }
             
+            if (selectedChatForOptions != null) {
+                ModalBottomSheet(onDismissRequest = { selectedChatForOptions = null }, containerColor = LocalChatColors.current.secondaryBackground) {
+                    val summary = selectedChatForOptions!!
+                    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp)) {
+                        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            AsyncImage(model = summary.friendPhotoUrl, contentDescription = null, modifier = Modifier.size(48.dp).clip(CircleShape).background(LocalChatColors.current.separator), contentScale = ContentScale.Crop)
+                            Spacer(Modifier.width(16.dp))
+                            Text(summary.friendName ?: summary.friendId, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        }
+                        HorizontalDivider(color = LocalChatColors.current.separator, thickness = 0.5.dp)
+                        
+                        ListItem(headlineContent = { Text("Abrir") }, leadingContent = { Icon(Icons.Rounded.Chat, null, tint = MessengerBlue) }, modifier = Modifier.clickable { viewModel.setTargetId(summary.friendId, summary.isGroup); selectedChatForOptions = null })
+                        ListItem(headlineContent = { Text("Limpar conversa") }, leadingContent = { Icon(Icons.Rounded.DeleteSweep, null, tint = MessengerBlue) }, modifier = Modifier.clickable { viewModel.clearChat(summary.friendId, summary.isGroup); selectedChatForOptions = null })
+                        ListItem(headlineContent = { Text("Excluir conversa", color = iOSRed) }, leadingContent = { Icon(Icons.Rounded.Delete, null, tint = iOSRed) }, modifier = Modifier.clickable { viewModel.deleteChat(summary.friendId); selectedChatForOptions = null })
+                        
+                        if (!summary.isGroup) {
+                            val isBlocked = blockedUsers.contains(summary.friendId)
+                            ListItem(headlineContent = { Text(if(isBlocked) "Desbloquear" else "Bloquear", color = iOSRed) }, leadingContent = { Icon(if(isBlocked) Icons.Default.LockOpen else Icons.Default.Block, null, tint = iOSRed) }, modifier = Modifier.clickable { if(isBlocked) viewModel.unblockUser(summary.friendId) else viewModel.blockUser(summary.friendId); selectedChatForOptions = null })
+                        }
+                    }
+                }
+            }
+
             if (viewingStatuses != null) {
                 StatusViewer(
                     userStatuses = viewingStatuses!!, 
@@ -644,11 +676,13 @@ fun TelegramTabs(selected: String, onSelect: (String) -> Unit) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StatusViewer(userStatuses: List<UserStatus>, myUsername: String, onClose: () -> Unit, onDelete: (String) -> Unit) {
     var currentIndex by remember { mutableIntStateOf(0) }
     val currentStatus = userStatuses[currentIndex]
     var progress by remember { mutableStateOf(0f) }
+    var showViewers by remember { mutableStateOf(false) }
     
     LaunchedEffect(currentIndex) {
         progress = 0f
@@ -656,8 +690,10 @@ fun StatusViewer(userStatuses: List<UserStatus>, myUsername: String, onClose: ()
         val steps = 100
         val stepTime = duration / steps
         for (i in 1..steps) {
-            delay(stepTime)
-            progress = i.toFloat() / steps
+            if (!showViewers) {
+                delay(stepTime)
+                progress = i.toFloat() / steps
+            }
         }
         if (currentIndex < userStatuses.size - 1) currentIndex++
         else onClose()
@@ -666,13 +702,11 @@ fun StatusViewer(userStatuses: List<UserStatus>, myUsername: String, onClose: ()
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         AsyncImage(model = currentStatus.imageUrl, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
         
-        // Camada de toque para navegação (atrás dos controles)
         Row(modifier = Modifier.fillMaxSize()) {
             Box(modifier = Modifier.weight(1f).fillMaxHeight().clickable { if (currentIndex > 0) currentIndex-- })
             Box(modifier = Modifier.weight(1f).fillMaxHeight().clickable { if (currentIndex < userStatuses.size - 1) currentIndex++ else onClose() })
         }
 
-        // Camada de controles (por cima de tudo)
         Column(modifier = Modifier.fillMaxWidth().padding(top = 40.dp)) {
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 userStatuses.forEachIndexed { index, _ ->
@@ -695,6 +729,36 @@ fun StatusViewer(userStatuses: List<UserStatus>, myUsername: String, onClose: ()
                     IconButton(onClick = { onDelete(currentStatus.id) }) { Icon(Icons.Rounded.Delete, null, tint = Color.White) }
                 }
                 IconButton(onClick = onClose) { Icon(Icons.Rounded.Close, null, tint = Color.White) }
+            }
+        }
+
+        if (currentStatus.userId == myUsername) {
+            Column(modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                IconButton(onClick = { showViewers = true }) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Rounded.Visibility, null, tint = Color.White)
+                        Text(currentStatus.viewers.size.toString(), color = Color.White, fontSize = 12.sp)
+                    }
+                }
+                Text("Vistos", color = Color.White.copy(0.8f), fontSize = 12.sp)
+            }
+        }
+    }
+
+    if (showViewers) {
+        ModalBottomSheet(onDismissRequest = { showViewers = false }, containerColor = MaterialTheme.colorScheme.surface) {
+            Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                Text("Visto por ${currentStatus.viewers.size} pessoas", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(16.dp))
+                LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp)) {
+                    items(currentStatus.viewers.keys.toList()) { viewerId ->
+                        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(modifier = Modifier.size(40.dp).clip(CircleShape).background(Color.LightGray)) // Aqui poderia buscar a foto real se necessário
+                            Spacer(Modifier.width(12.dp))
+                            Text(viewerId, style = MaterialTheme.typography.bodyLarge)
+                        }
+                    }
+                }
             }
         }
     }
@@ -829,9 +893,10 @@ fun MetaStatusRow(statuses: List<UserStatus>, myPhotoUrl: String?, myUsername: S
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun MetaChatItem(summary: ChatSummary, onClick: () -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+fun MetaChatItem(summary: ChatSummary, onClick: () -> Unit, onLongClick: () -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongClick).padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         Box { 
             AsyncImage(model = summary.friendPhotoUrl, contentDescription = null, modifier = Modifier.size(60.dp).clip(CircleShape).background(LocalChatColors.current.separator), contentScale = ContentScale.Crop)
             val presenceColor = when(summary.presenceStatus) {

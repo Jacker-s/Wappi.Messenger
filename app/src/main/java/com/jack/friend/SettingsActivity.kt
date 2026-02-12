@@ -12,8 +12,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -35,6 +36,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -57,9 +59,9 @@ class SettingsActivity : ComponentActivity() {
                 val myName by viewModel.myName.collectAsStateWithLifecycle("")
                 val myPhotoUrl by viewModel.myPhotoUrl.collectAsStateWithLifecycle(null)
                 val myPresenceStatus by viewModel.myPresenceStatus.collectAsStateWithLifecycle("Online")
+                val blockedProfiles by viewModel.blockedProfiles.collectAsStateWithLifecycle(emptyList())
 
                 val securityPrefs = remember { context.getSharedPreferences("security_prefs", MODE_PRIVATE) }
-                val privacyPrefs = remember { context.getSharedPreferences("privacy_prefs", MODE_PRIVATE) }
 
                 var nameInput by remember { mutableStateOf("") }
                 var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
@@ -67,12 +69,12 @@ class SettingsActivity : ComponentActivity() {
 
                 var isPinEnabled by remember { mutableStateOf(securityPrefs.getBoolean("pin_enabled", false)) }
                 var isBiometricEnabled by remember { mutableStateOf(securityPrefs.getBoolean("biometric_enabled", false)) }
-                var readReceiptsEnabled by remember { mutableStateOf(privacyPrefs.getBoolean("read_receipts_enabled", true)) }
 
                 var showPinDialog by remember { mutableStateOf(false) }
                 var pinInput by remember { mutableStateOf("") }
                 var showDeleteAccountDialog by remember { mutableStateOf(false) }
                 var showPresenceMenu by remember { mutableStateOf(false) }
+                var showBlockedDialog by remember { mutableStateOf(false) }
 
                 LaunchedEffect(myName) { if (nameInput.isEmpty()) nameInput = myName }
                 LaunchedEffect(myPresenceStatus) { selectedPresence = myPresenceStatus }
@@ -183,11 +185,7 @@ class SettingsActivity : ComponentActivity() {
                         MetaSettingsSection {
                             MetaSettingsSwitchItem(icon = Icons.Default.DarkMode, iconColor = Color.Black, title = "Modo escuro", checked = isDarkMode, onCheckedChange = { isDarkMode = it })
                             MetaSettingsDivider()
-                            MetaSettingsSwitchItem(icon = Icons.Default.Visibility, iconColor = MessengerBlue, title = "Status online", checked = readReceiptsEnabled, onCheckedChange = {
-                                readReceiptsEnabled = it
-                                privacyPrefs.edit().putBoolean("read_receipts_enabled", it).apply()
-                                viewModel.updatePresence(it)
-                            })
+                            MetaSettingsItem(title = "Usuários Bloqueados", icon = Icons.Default.Block, iconColor = iOSRed, onClick = { showBlockedDialog = true })
                         }
 
                         Text("SEGURANÇA", modifier = Modifier.padding(horizontal = 28.dp, vertical = 12.dp), style = MaterialTheme.typography.labelSmall, color = MetaGray4, fontWeight = FontWeight.Bold)
@@ -224,6 +222,38 @@ class SettingsActivity : ComponentActivity() {
                         }
                         Spacer(Modifier.height(40.dp))
                     }
+                }
+
+                if (showBlockedDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showBlockedDialog = false },
+                        title = { Text("Usuários Bloqueados") },
+                        text = {
+                            if (blockedProfiles.isEmpty()) {
+                                Text("Nenhum usuário bloqueado.")
+                            } else {
+                                LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
+                                    items(blockedProfiles) { profile ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                                AsyncImage(model = profile.photoUrl, contentDescription = null, modifier = Modifier.size(36.dp).clip(CircleShape).background(LocalChatColors.current.separator), contentScale = ContentScale.Crop)
+                                                Spacer(Modifier.width(12.dp))
+                                                Text(profile.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            }
+                                            TextButton(onClick = { viewModel.unblockUser(profile.id) }) {
+                                                Text("Desbloquear", color = MessengerBlue)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        confirmButton = { TextButton(onClick = { showBlockedDialog = false }) { Text("Fechar") } }
+                    )
                 }
 
                 if (showDeleteAccountDialog) {
