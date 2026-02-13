@@ -73,6 +73,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
@@ -152,43 +154,163 @@ fun LoginScreen(viewModel: ChatViewModel) {
     var email by remember { mutableStateOf("") }; var password by remember { mutableStateOf("") }
     var username by remember { mutableStateOf("") }; var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     var isSignUp by remember { mutableStateOf(false) }; var loading by remember { mutableStateOf(false) }
+    var showResetPassword by remember { mutableStateOf(false) }
     val context = LocalContext.current
     
     val photoLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? -> selectedImageUri = uri }
 
-    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 30.dp).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Top) {
-        Spacer(modifier = Modifier.height(100.dp))
-        Icon(Icons.Rounded.ChatBubble, null, modifier = Modifier.size(80.dp), tint = MessengerBlue)
-        Spacer(modifier = Modifier.height(20.dp))
-        Text(text = if (isSignUp) "Crie sua conta" else "Bem-vindo de volta", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
-        Spacer(modifier = Modifier.height(40.dp))
-        
-        if (isSignUp) {
-            Box(modifier = Modifier.size(110.dp).clip(CircleShape).background(LocalChatColors.current.separator).clickable { photoLauncher.launch("image/*") }, contentAlignment = Alignment.Center) {
-                if (selectedImageUri != null) AsyncImage(model = selectedImageUri, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                else Icon(Icons.Rounded.PhotoCamera, null, modifier = Modifier.size(36.dp), tint = MessengerBlue)
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Design Refeito: Fundo com leve gradiente no topo
+        Box(modifier = Modifier.fillMaxWidth().height(300.dp).background(Brush.verticalGradient(listOf(MessengerBlue.copy(alpha = 0.1f), Color.Transparent))))
+
+        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
+            Spacer(modifier = Modifier.height(80.dp))
+            
+            // Logo Icon Animado/Estilizado
+            Surface(modifier = Modifier.size(90.dp), shape = RoundedCornerShape(24.dp), color = MessengerBlue, shadowElevation = 8.dp) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.ChatBubble, null, modifier = Modifier.size(45.dp), tint = Color.White)
+                }
             }
-            Spacer(modifier = Modifier.height(30.dp))
-            MetaTextField(username, { username = it }, "Nome de usuário")
-            Spacer(modifier = Modifier.height(12.dp))
-        }
-        MetaTextField(email, { email = it }, "E-mail ou Telefone", keyboardType = KeyboardType.Email)
-        Spacer(modifier = Modifier.height(12.dp))
-        MetaTextField(password, { password = it }, "Senha", isPassword = true)
-        Spacer(modifier = Modifier.height(40.dp))
-        
-        if (loading) CircularProgressIndicator(color = MessengerBlue)
-        else {
-            Button(onClick = { loading = true; if (isSignUp) viewModel.signUp(email, password, username, selectedImageUri) { s, e -> loading = false; if (!s) Toast.makeText(context, e ?: "Erro", Toast.LENGTH_SHORT).show() } else viewModel.login(email, password) { s, e -> loading = false; if (!s) Toast.makeText(context, e ?: "Erro", Toast.LENGTH_SHORT).show() } }, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(25.dp), colors = ButtonDefaults.buttonColors(containerColor = MessengerBlue)) { Text(if (isSignUp) "Registrar" else "Entrar", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, color = Color.White) }
+            
+            Spacer(modifier = Modifier.height(24.dp))
+            Text(text = "Friend", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Black, color = MessengerBlue)
+            Text(text = if (isSignUp) "Crie sua conta agora" else "Conecte-se com seus amigos", style = MaterialTheme.typography.bodyMedium, color = MetaGray4)
+            
+            Spacer(modifier = Modifier.height(48.dp))
+            
+            if (isSignUp) {
+                Box(modifier = Modifier.size(100.dp).clip(CircleShape).background(LocalChatColors.current.tertiaryBackground).clickable { photoLauncher.launch("image/*") }.border(2.dp, if(selectedImageUri != null) MessengerBlue else Color.Transparent, CircleShape), contentAlignment = Alignment.Center) {
+                    if (selectedImageUri != null) AsyncImage(model = selectedImageUri, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    else Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Rounded.AddAPhoto, null, tint = MessengerBlue)
+                        Text("Foto", fontSize = 10.sp, color = MessengerBlue, fontWeight = FontWeight.Bold)
+                    }
+                }
+                Spacer(modifier = Modifier.height(24.dp))
+                MetaTextField(username, { username = it }, "Nome de usuário", Icons.Rounded.Person)
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            MetaTextField(email, { email = it }, "E-mail", Icons.Rounded.Email, keyboardType = KeyboardType.Email)
             Spacer(modifier = Modifier.height(16.dp))
-            TextButton(onClick = { isSignUp = !isSignUp }, modifier = Modifier.padding(top = 20.dp)) { Text(text = if (isSignUp) "Já tem uma conta? Conectar" else "Não tem conta? Criar novo perfil", color = MessengerBlue, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold) }
+            MetaTextField(password, { password = it }, "Senha", Icons.Rounded.Lock, isPassword = true)
+            
+            if (!isSignUp) {
+                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                    TextButton(onClick = { showResetPassword = true }) {
+                        Text("Esqueceu a senha?", color = MessengerBlue, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    }
+                }
+            } else {
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+            
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            if (loading) {
+                CircularProgressIndicator(color = MessengerBlue, modifier = Modifier.size(32.dp))
+            } else {
+                Button(
+                    onClick = { 
+                        loading = true
+                        if (isSignUp) {
+                            viewModel.signUp(email, password, username, selectedImageUri) { s, e -> 
+                                loading = false
+                                if (!s) Toast.makeText(context, e ?: "Erro", Toast.LENGTH_SHORT).show() 
+                            }
+                        } else {
+                            viewModel.login(email, password) { s, e -> 
+                                loading = false
+                                if (!s) Toast.makeText(context, e ?: "Erro", Toast.LENGTH_SHORT).show() 
+                            }
+                        }
+                    }, 
+                    modifier = Modifier.fillMaxWidth().height(56.dp), 
+                    shape = RoundedCornerShape(16.dp), 
+                    colors = ButtonDefaults.buttonColors(containerColor = MessengerBlue)
+                ) { 
+                    Text(if (isSignUp) "Criar Conta" else "Entrar", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) 
+                }
+                
+                Spacer(modifier = Modifier.height(24.dp))
+                
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    HorizontalDivider(modifier = Modifier.weight(1f), color = LocalChatColors.current.separator)
+                    Text("OU", modifier = Modifier.padding(horizontal = 16.dp), color = MetaGray4, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    HorizontalDivider(modifier = Modifier.weight(1f), color = LocalChatColors.current.separator)
+                }
+
+                TextButton(onClick = { isSignUp = !isSignUp }, modifier = Modifier.padding(vertical = 16.dp)) {
+                    Text(
+                        text = if (isSignUp) "Já tem uma conta? Conectar" else "Novo por aqui? Crie um perfil", 
+                        color = MessengerBlue, 
+                        style = MaterialTheme.typography.bodyMedium, 
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(40.dp))
         }
+    }
+
+    if (showResetPassword) {
+        var resetEmail by remember { mutableStateOf(email) }
+        AlertDialog(
+            onDismissRequest = { showResetPassword = false },
+            title = { Text("Recuperar Senha") },
+            text = {
+                Column {
+                    Text("Enviaremos um link de redefinição para o seu e-mail.")
+                    Spacer(Modifier.height(16.dp))
+                    MetaTextField(resetEmail, { resetEmail = it }, "E-mail de cadastro", Icons.Rounded.Email)
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (resetEmail.isNotBlank()) {
+                        viewModel.resetPassword(resetEmail) { success, error ->
+                            if (success) {
+                                Toast.makeText(context, "Link enviado com sucesso!", Toast.LENGTH_LONG).show()
+                                showResetPassword = false
+                            } else {
+                                Toast.makeText(context, error ?: "Erro ao enviar", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                }) { Text("Enviar Link") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetPassword = false }) { Text("Cancelar") }
+            },
+            shape = RoundedCornerShape(20.dp)
+        )
     }
 }
 
 @Composable
-fun MetaTextField(value: String, onValueChange: (String) -> Unit, placeholder: String, isPassword: Boolean = false, keyboardType: KeyboardType = KeyboardType.Email) {
-    TextField(value = value, onValueChange = onValueChange, placeholder = { Text(placeholder, color = MetaGray4) }, modifier = Modifier.fillMaxWidth(), visualTransformation = if (isPassword) PasswordVisualTransformation() else VisualTransformation.None, keyboardOptions = KeyboardOptions(keyboardType = keyboardType), shape = RoundedCornerShape(12.dp), singleLine = true, textStyle = MaterialTheme.typography.bodyLarge, colors = TextFieldDefaults.colors(focusedContainerColor = LocalChatColors.current.tertiaryBackground, unfocusedContainerColor = LocalChatColors.current.tertiaryBackground, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, cursorColor = MessengerBlue, focusedTextColor = MaterialTheme.colorScheme.onSurface, unfocusedTextColor = MaterialTheme.colorScheme.onSurface))
+fun MetaTextField(value: String, onValueChange: (String) -> Unit, placeholder: String, icon: ImageVector, isPassword: Boolean = false, keyboardType: KeyboardType = KeyboardType.Text) {
+    TextField(
+        value = value, 
+        onValueChange = onValueChange, 
+        placeholder = { Text(placeholder, color = MetaGray4) }, 
+        modifier = Modifier.fillMaxWidth(), 
+        leadingIcon = { Icon(icon, null, tint = MetaGray4, modifier = Modifier.size(20.dp)) },
+        visualTransformation = if (isPassword) PasswordVisualTransformation() else VisualTransformation.None, 
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType), 
+        shape = RoundedCornerShape(16.dp), 
+        singleLine = true, 
+        textStyle = MaterialTheme.typography.bodyLarge, 
+        colors = TextFieldDefaults.colors(
+            focusedContainerColor = LocalChatColors.current.tertiaryBackground, 
+            unfocusedContainerColor = LocalChatColors.current.tertiaryBackground, 
+            focusedIndicatorColor = Color.Transparent, 
+            unfocusedIndicatorColor = Color.Transparent, 
+            cursorColor = MessengerBlue, 
+            focusedTextColor = MaterialTheme.colorScheme.onSurface, 
+            unfocusedTextColor = MaterialTheme.colorScheme.onSurface
+        )
+    )
 }
 
 @Composable
@@ -629,7 +751,7 @@ fun CreateGroupScreen(contacts: List<UserProfile>, onCreate: (String, List<Strin
                 else Icon(Icons.Rounded.PhotoCamera, null, tint = MessengerBlue)
             }
             Spacer(Modifier.width(16.dp))
-            MetaTextField(groupName, { groupName = it }, "Nome do grupo")
+            MetaTextField(groupName, { groupName = it }, "Nome do grupo", Icons.Rounded.Group)
         }
         Spacer(Modifier.height(24.dp))
         Text("Selecionar Membros (${selectedMembers.size})", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -802,7 +924,7 @@ fun AddContactDialog(onDismiss: () -> Unit, onAdd: (String) -> Unit) {
             Column {
                 Text("Digite o username exato do usuário:")
                 Spacer(Modifier.height(12.dp))
-                MetaTextField(username, { username = it }, "Username")
+                MetaTextField(username, { username = it }, "Username", Icons.Rounded.Person)
             }
         },
         confirmButton = { TextButton(onClick = { if (username.isNotBlank()) onAdd(username) }) { Text("Adicionar") } },
@@ -1040,28 +1162,88 @@ fun MetaMessageBubble(
     }
 
     if (showContext) { 
-        val emojis = listOf("❤️", "😂", "😮", "😢", "🙏", "👍")
-        AlertDialog(
-            onDismissRequest = { showContext = false },
-            confirmButton = {},
-            title = {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    emojis.forEach { emoji ->
-                        Text(emoji, modifier = Modifier.clickable { onReact(emoji); showContext = false }.padding(8.dp), fontSize = 24.sp)
-                    }
-                }
-            },
-            text = {
-                Column {
-                    ListItem(headlineContent = { Text("Responder") }, leadingContent = { Icon(Icons.AutoMirrored.Filled.Reply, null) }, modifier = Modifier.clickable { onReply(); showContext = false })
-                    if (isMe) ListItem(headlineContent = { Text("Editar") }, leadingContent = { Icon(Icons.Default.Edit, null) }, modifier = Modifier.clickable { onEdit(); showContext = false })
-                    ListItem(headlineContent = { Text("Fixar") }, leadingContent = { Icon(Icons.Default.PushPin, null) }, modifier = Modifier.clickable { onPin(); showContext = false })
-                    ListItem(headlineContent = { Text("Copiar") }, leadingContent = { Icon(Icons.Default.ContentCopy, null) }, modifier = Modifier.clickable { clipboardManager.setText(AnnotatedString(message.text)); showContext = false })
-                    ListItem(headlineContent = { Text("Remover", color = Color.Red) }, leadingContent = { Icon(Icons.Default.Delete, null, tint = Color.Red) }, modifier = Modifier.clickable { onDelete(message.id); showContext = false })
-                }
-            }
+        SwiftUIMessageMenu(
+            isMe = isMe,
+            onDismiss = { showContext = false },
+            onReply = { onReply(); showContext = false },
+            onEdit = { onEdit(); showContext = false },
+            onPin = { onPin(); showContext = false },
+            onCopy = { clipboardManager.setText(AnnotatedString(message.text)); showContext = false },
+            onDelete = { onDelete(message.id); showContext = false },
+            onReact = { onReact(it); showContext = false }
         )
     }
+}
+
+@Composable
+fun SwiftUIMessageMenu(
+    isMe: Boolean,
+    onDismiss: () -> Unit,
+    onReply: () -> Unit,
+    onEdit: () -> Unit,
+    onPin: () -> Unit,
+    onCopy: () -> Unit,
+    onDelete: () -> Unit,
+    onReact: (String) -> Unit
+) {
+    val emojis = listOf("❤️", "😂", "😮", "😢", "🙏", "👍")
+    
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(0.4f)).clickable { onDismiss() }, contentAlignment = Alignment.Center) {
+            Column(modifier = Modifier.width(250.dp).padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                // Reaction Bar
+                Surface(
+                    shape = RoundedCornerShape(30.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                ) {
+                    Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        emojis.forEach { emoji ->
+                            Text(emoji, modifier = Modifier.clickable { onReact(emoji) }, fontSize = 26.sp)
+                        }
+                    }
+                }
+
+                // Menu Actions
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column {
+                        SwiftUIMenuItem("Responder", Icons.AutoMirrored.Rounded.Reply, onClick = onReply)
+                        SwiftUIDivider()
+                        if (isMe) {
+                            SwiftUIMenuItem("Editar", Icons.Rounded.Edit, onClick = onEdit)
+                            SwiftUIDivider()
+                        }
+                        SwiftUIMenuItem("Fixar", Icons.Rounded.PushPin, onClick = onPin)
+                        SwiftUIDivider()
+                        SwiftUIMenuItem("Copiar", Icons.Rounded.ContentCopy, onClick = onCopy)
+                        SwiftUIDivider()
+                        SwiftUIMenuItem("Remover", Icons.Rounded.Delete, color = iOSRed, onClick = onDelete)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SwiftUIMenuItem(text: String, icon: ImageVector, color: Color = MaterialTheme.colorScheme.onSurface, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = 16.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text, style = MaterialTheme.typography.bodyLarge, color = color)
+        Icon(icon, null, tint = color, modifier = Modifier.size(20.dp))
+    }
+}
+
+@Composable
+fun SwiftUIDivider() {
+    HorizontalDivider(modifier = Modifier.padding(horizontal = 0.dp), thickness = 0.5.dp, color = LocalChatColors.current.separator)
 }
 
 @Composable

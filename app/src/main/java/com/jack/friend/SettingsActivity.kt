@@ -257,8 +257,25 @@ class SettingsActivity : ComponentActivity() {
                 }
 
                 if (showDeleteAccountDialog) {
-                    AlertDialog(onDismissRequest = { showDeleteAccountDialog = false }, title = { Text("Excluir conta?") }, text = { Text("Esta ação não pode ser desfeita.") },
-                        confirmButton = { TextButton(onClick = { viewModel.deleteAccount { _, _ -> finish() } }) { Text("Excluir", color = Color(0xFFFA3E3E)) } },
+                    AlertDialog(onDismissRequest = { showDeleteAccountDialog = false }, title = { Text("Excluir conta?") }, text = { Text("Esta ação não pode ser desfeita. Para sua segurança, você precisa ter feito login recentemente para excluir a conta.") },
+                        confirmButton = { 
+                            TextButton(onClick = { 
+                                viewModel.deleteAccount { success, error -> 
+                                    if (success) {
+                                        val intent = Intent(context, MainActivity::class.java).apply {
+                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                                        }
+                                        context.startActivity(intent)
+                                        finish()
+                                    } else {
+                                        Toast.makeText(context, error ?: "Erro ao excluir conta. Tente sair e entrar novamente.", Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                                showDeleteAccountDialog = false 
+                            }) { 
+                                Text("Excluir", color = Color(0xFFFA3E3E)) 
+                            } 
+                        },
                         dismissButton = { TextButton(onClick = { showDeleteAccountDialog = false }) { Text("Cancelar") } }
                     )
                 }

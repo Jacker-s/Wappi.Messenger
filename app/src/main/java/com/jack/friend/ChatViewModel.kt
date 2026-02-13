@@ -121,14 +121,16 @@ class ChatViewModel : ViewModel() {
         val uid = auth.currentUser?.uid ?: return
         db.child("uid_to_username").child(uid).get().addOnSuccessListener { snapshot ->
             val username = snapshot.getValue(String::class.java) ?: ""
-            _myUsername.value = username
             if (username.isNotEmpty()) {
+                _myUsername.value = username
                 loadMyProfile(username)
                 listenToBlockedUsers(username)
                 listenToChats(username)
                 listenToContacts(username)
                 listenToStatuses(username) 
                 setupPresence(username)
+            } else {
+                Log.e("ChatViewModel", "Username não encontrado para o UID: $uid")
             }
         }.addOnFailureListener { Log.e("ChatViewModel", "Erro setupUserSession: ${it.message}") }
     }
@@ -755,35 +757,74 @@ class ChatViewModel : ViewModel() {
 
     fun signUp(email: String, password: String, username: String, imageUri: Uri?, callback: (Boolean, String?) -> Unit) {
         val upper = username.uppercase().trim()
-        db.child("users").child(upper).get().addOnSuccessListener { snapshot ->
-            if (snapshot.exists()) return@addOnSuccessListener callback(false, "Username já existe")
-            auth.createUserWithEmailAndPassword(email, password).addOnCompleteListener { task ->
-                if (task.isSuccessful) {
-                    val uid = auth.currentUser?.uid ?: ""
-                    _myId.value = uid
-                    viewModelScope.launch {
-                        try {
-                            val photoUrl = imageUri?.let { uploadToCloudinary(it, "profiles") }
-                            val profile = UserProfile(id = upper, uid = uid, name = username, photoUrl = photoUrl, isOnline = true)
-                            db.child("uid_to_username").child(uid).setValue(upper).await()
-                            db.child("users").child(upper).setValue(profile).await()
-                            _isUserLoggedIn.value = true
-                            setupUserSession()
-                            callback(true, null)
-                        } catch (e: Exception) { callback(false, e.message) }
+        
+        // 1. Criar no Auth primeiro para autenticar
+        auth.createUserWithEmailAndPassword(email, password).addOnCompleteListener { task ->
+            if (task.isSuccessful) {
+                val uid = auth.currentUser?.uid ?: ""
+                
+                // 2. Agora autenticados, verificamos se o username está disponível
+                db.child("users").child(upper).get().addOnSuccessListener { snapshot ->
+                    if (snapshot.exists()) {
+                        auth.currentUser?.delete()
+                        callback(false, "Este nome de usuário já está em uso.")
+                    } else {
+                        viewModelScope.launch {
+                            try {
+                                val photoUrl = imageUri?.let { uploadToCloudinary(it, "profiles") }
+                                val profile = UserProfile(id = upper, uid = uid, name = username, photoUrl = photoUrl, isOnline = true)
+                                
+                                db.child("uid_to_username").child(uid).setValue(upper).await()
+                                db.child("users").child(upper).setValue(profile).await()
+                                
+                                _myUsername.value = upper
+                                _isUserLoggedIn.value = true
+                                setupUserSession()
+                                callback(true, null)
+                            } catch (e: Exception) {
+                                auth.currentUser?.delete()
+                                callback(false, "Erro ao salvar perfil: ${e.message}")
+                            }
+                        }
                     }
-                } else callback(false, task.exception?.message)
+                }.addOnFailureListener {
+                    auth.currentUser?.delete()
+                    callback(false, "Erro de permissão no banco: ${it.message}")
+                }
+            } else {
+                callback(false, task.exception?.message ?: "Erro ao criar conta")
             }
         }
     }
 
     fun login(email: String, password: String, callback: (Boolean, String?) -> Unit) {
         auth.signInWithEmailAndPassword(email, password).addOnCompleteListener { task ->
-            if (task.isSuccessful) { 
-                _isUserLoggedIn.value = true 
-                setupUserSession()
-                callback(true, null) 
+            if (task.isSuccessful) {
+                val uid = auth.currentUser?.uid ?: ""
+                db.child("uid_to_username").child(uid).get().addOnSuccessListener { snapshot ->
+                    val username = snapshot.getValue(String::class.java)
+                    if (username != null) {
+                        _myUsername.value = username
+                        _isUserLoggedIn.value = true
+                        setupUserSession()
+                        callback(true, null)
+                    } else {
+                        auth.signOut()
+                        callback(false, "Perfil não encontrado no banco de dados.")
+                    }
+                }.addOnFailureListener {
+                    auth.signOut()
+                    callback(false, "Erro ao carregar dados do perfil: ${it.message}")
+                }
+            } else {
+                callback(false, task.exception?.message ?: "E-mail ou senha incorretos")
             }
+        }
+    }
+
+    fun resetPassword(email: String, callback: (Boolean, String?) -> Unit) {
+        auth.sendPasswordResetEmail(email).addOnCompleteListener { task ->
+            if (task.isSuccessful) callback(true, null)
             else callback(false, task.exception?.message)
         }
     }
@@ -853,12 +894,47 @@ class ChatViewModel : ViewModel() {
     fun deleteAccount(callback: (Boolean, String?) -> Unit) {
         val user = auth.currentUser ?: return
         val username = _myUsername.value
-        user.delete().addOnCompleteListener { task ->
-            if (task.isSuccessful) {
-                if (username.isNotEmpty()) { db.child("users").child(username).removeValue(); db.child("chats").child(username).removeValue() }
+        
+        viewModelScope.launch {
+            try {
+                // 1. Notificar todos que a conta foi excluída nos resumos de conversa
+                val chatsSnapshot = db.child("chats").child(username).get().await()
+                chatsSnapshot.children.forEach { chatSnap ->
+                    val summary = chatSnap.getValue(ChatSummary::class.java) ?: return@forEach
+                    val friendId = summary.friendId
+                    
+                    if (!summary.isGroup) {
+                        val update = mapOf(
+                            "friendName" to "Conta Excluída",
+                            "lastMessage" to "Esta conta foi excluída",
+                            "friendPhotoUrl" to null,
+                            "isOnline" to false,
+                            "presenceStatus" to "Offline"
+                        )
+                        db.child("chats").child(friendId).child(username).updateChildren(update)
+                    }
+                }
+
+                // 2. Excluir do Firebase Auth
+                user.delete().await()
+
+                // 3. Limpar dados do banco de dados
+                if (username.isNotEmpty()) {
+                    db.child("users").child(username).removeValue()
+                    db.child("chats").child(username).removeValue()
+                    db.child("contacts").child(username).removeValue()
+                    db.child("blocks").child(username).removeValue()
+                    db.child("status").orderByChild("userId").equalTo(username).get().addOnSuccessListener { 
+                        it.children.forEach { s -> s.ref.removeValue() }
+                    }
+                }
                 db.child("uid_to_username").child(user.uid).removeValue()
-                logout(); callback(true, null)
-            } else callback(false, task.exception?.message)
+                
+                logout()
+                callback(true, null)
+            } catch (e: Exception) {
+                callback(false, e.message)
+            }
         }
     }
 
@@ -950,7 +1026,7 @@ class ChatViewModel : ViewModel() {
 
     fun clearChat(friendId: String, isGroup: Boolean) {
         val me = _myUsername.value
-        if (me.isEmpty() || friendId.isBlank()) return
+        if (me.isEmpty()) return
         
         if (isGroup) {
             val summaryUpdate = mapOf("lastMessage" to "Conversa limpa", "timestamp" to System.currentTimeMillis(), "hasUnread" to false)
